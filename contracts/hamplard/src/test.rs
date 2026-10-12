@@ -4671,13 +4671,16 @@ fn test_events_emitted_for_admin_operations() {
     assert_eq!(event_admin, admin);
 
     // update_default_fee
+    let ledger_before_fee = env.ledger().sequence();
     client.update_default_fee(&admin, &25u32);
-    let (event_admin, event_fee): (Address, u32) =
+    let (old_fee, new_fee, event_admin, event_ledger): (u32, u32, Address, u32) =
         last_event_val(&env, &contract_id, "default_fee_updated")
             .try_into_val(&env)
             .unwrap();
+    assert_eq!(old_fee, 20u32);
+    assert_eq!(new_fee, 25u32);
     assert_eq!(event_admin, admin);
-    assert_eq!(event_fee, 25u32);
+    assert_eq!(event_ledger, ledger_before_fee);
 
     // add_approved_token / remove_approved_token
     let other_token = Address::generate(&env);
@@ -10832,3 +10835,47 @@ fn test_process_refund_archives_enrollment_to_history() {
     assert_eq!(archived.student, student);
     assert_eq!(archived.course_id, course_id);
 }
+
+// ============================================================
+// ISSUE #303 — update_default_fee Soroban event auditability
+// ============================================================
+
+#[test]
+fn test_update_default_fee_emits_event_with_old_and_new_fee_and_ledger() {
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    // Initial platform fee is 20%
+    assert_eq!(client.get_platform_fee(&admin), 20u32);
+
+    let ledger_before = env.ledger().sequence();
+    client.update_default_fee(&admin, &35u32);
+
+    assert!(has_event(&env, &contract_id, "default_fee_updated"));
+    let (old_fee, new_fee, event_admin, event_ledger): (u32, u32, Address, u32) =
+        last_event_val(&env, &contract_id, "default_fee_updated")
+            .try_into_val(&env)
+            .unwrap();
+
+    assert_eq!(old_fee, 20u32);
+    assert_eq!(new_fee, 35u32);
+    assert_eq!(event_admin, admin);
+    assert_eq!(event_ledger, ledger_before);
+    assert_eq!(client.get_platform_fee(&admin), 35u32);
+
+    // Subsequent fee change from 35% to 10%
+    let ledger_second = env.ledger().sequence();
+    client.update_default_fee(&admin, &10u32);
+
+    let (old_fee2, new_fee2, event_admin2, event_ledger2): (u32, u32, Address, u32) =
+        last_event_val(&env, &contract_id, "default_fee_updated")
+            .try_into_val(&env)
+            .unwrap();
+
+    assert_eq!(old_fee2, 35u32);
+    assert_eq!(new_fee2, 10u32);
+    assert_eq!(event_admin2, admin);
+    assert_eq!(event_ledger2, ledger_second);
+    assert_eq!(client.get_platform_fee(&admin), 10u32);
+}
+
