@@ -220,6 +220,37 @@ pub struct EnrollmentRejected {
     pub ledger_sequence: u32,
 }
 
+/// Specific failure reason codes for auditability when an enrollment attempt is rejected.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum EnrollmentFailureReason {
+    StudentBlocked = 1,
+    InstructorFrozen = 2,
+    AdminSelfEnrollment = 3,
+    InstructorSelfEnrollment = 4,
+    AlreadyEnrolled = 5,
+    CapacityExceeded = 6,
+    CourseExpired = 7,
+    PrerequisiteNotMet = 8,
+    PlatformCapExceeded = 9,
+    PlatformPaused = 10,
+    EnrollmentNotStarted = 11,
+    UnapprovedToken = 12,
+    InvalidTokenDecimals = 13,
+}
+
+/// Emitted when an enrollment fails validation checks.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnrollmentFailed {
+    pub course_id: String,
+    pub student: Address,
+    pub reason: EnrollmentFailureReason,
+    pub ledger_sequence: u32,
+}
+
+
 // ============================================================
 // DATA TYPES
 // ============================================================
@@ -2171,6 +2202,23 @@ impl HamplardContract {
         }
     }
 
+    fn emit_enrollment_failed(
+        env: &Env,
+        course_id: &String,
+        student: &Address,
+        reason: EnrollmentFailureReason,
+    ) {
+        env.events().publish(
+            (Symbol::new(env, "EnrollmentFailed"), course_id.clone()),
+            EnrollmentFailed {
+                course_id: course_id.clone(),
+                student: student.clone(),
+                reason,
+                ledger_sequence: env.ledger().sequence(),
+            },
+        );
+    }
+
     fn validate_enrollment(env: &Env, student: &Address, course_id: &String) {
         if env
             .storage()
@@ -2178,6 +2226,7 @@ impl HamplardContract {
             .get(&DataKey::PlatformPaused)
             .unwrap_or(false)
         {
+            Self::emit_enrollment_failed(env, course_id, student, EnrollmentFailureReason::PlatformPaused);
             panic!("platform is paused");
         }
 
@@ -2185,19 +2234,23 @@ impl HamplardContract {
             Self::get_course_internal(env, course_id).unwrap_or_else(|| panic!("course not found"));
 
         if Self::is_student_blocked_internal(env, student) {
+            Self::emit_enrollment_failed(env, course_id, student, EnrollmentFailureReason::StudentBlocked);
             panic!("student is blocked");
         }
 
         if Self::is_instructor_frozen_internal(env, &course.instructor) {
+            Self::emit_enrollment_failed(env, course_id, student, EnrollmentFailureReason::InstructorFrozen);
             panic!("instructor is frozen");
         }
 
         if Self::is_admin(env, student) {
+            Self::emit_enrollment_failed(env, course_id, student, EnrollmentFailureReason::AdminSelfEnrollment);
             panic!("admin cannot enroll in courses");
         }
 
         // Issue 168: Self-enrollment guard
         if *student == env.current_contract_address() {
+            Self::emit_enrollment_failed(env, course_id, student, EnrollmentFailureReason::AdminSelfEnrollment);
             panic!("enroll: student cannot be the contract itself");
         }
 
@@ -2212,6 +2265,7 @@ impl HamplardContract {
         }
 
         if *student == course.instructor {
+            Self::emit_enrollment_failed(env, course_id, student, EnrollmentFailureReason::InstructorSelfEnrollment);
             panic!("instructor cannot enroll in own course");
         }
 
@@ -2237,6 +2291,7 @@ impl HamplardContract {
 
         if let Some(enrollment_start_ledger) = course.enrollment_start_ledger {
             if env.ledger().sequence() < enrollment_start_ledger {
+                Self::emit_enrollment_failed(env, course_id, student, EnrollmentFailureReason::EnrollmentNotStarted);
                 panic!("enrollment has not started for this course");
             }
         }
@@ -2246,16 +2301,19 @@ impl HamplardContract {
             .persistent()
             .has(&DataKey::Enrollment(student.clone(), course_id.clone()))
         {
+            Self::emit_enrollment_failed(env, course_id, student, EnrollmentFailureReason::AlreadyEnrolled);
             panic!("already enrolled in this course");
         }
         if let Some(cap) = course.max_capacity {
             if course.total_enrollments >= cap {
+                Self::emit_enrollment_failed(env, course_id, student, EnrollmentFailureReason::CapacityExceeded);
                 panic!("course has reached maximum enrollment capacity");
             }
         }
 
         if let Some(expiry) = course.expires_at_ledger {
             if env.ledger().sequence() >= expiry {
+                Self::emit_enrollment_failed(env, course_id, student, EnrollmentFailureReason::CourseExpired);
                 panic!("course has expired");
             }
         }
@@ -2265,6 +2323,7 @@ impl HamplardContract {
             .instance()
             .has(&DataKey::ApprovedToken(course.token.clone()))
         {
+            Self::emit_enrollment_failed(env, course_id, student, EnrollmentFailureReason::UnapprovedToken);
             panic!("course token is not approved");
         }
 
@@ -2273,6 +2332,7 @@ impl HamplardContract {
         let token_decimals = token_client.decimals();
         const EXPECTED_TOKEN_DECIMALS: u32 = 7;
         if token_decimals != EXPECTED_TOKEN_DECIMALS {
+            Self::emit_enrollment_failed(env, course_id, student, EnrollmentFailureReason::InvalidTokenDecimals);
             panic!(
                 "token decimal precision must be {} (found {})",
                 EXPECTED_TOKEN_DECIMALS, token_decimals
@@ -2303,6 +2363,7 @@ impl HamplardContract {
             };
 
             if !has_valid_certificate {
+                Self::emit_enrollment_failed(env, course_id, student, EnrollmentFailureReason::PrerequisiteNotMet);
                 panic!("prerequisite course not completed");
             }
         }
@@ -2319,6 +2380,7 @@ impl HamplardContract {
                 .get(&DataKey::TotalActiveEnrollments)
                 .unwrap_or(0);
             if total_active >= platform_cap {
+                Self::emit_enrollment_failed(env, course_id, student, EnrollmentFailureReason::PlatformCapExceeded);
                 panic!("platform has reached maximum total enrollment capacity");
             }
         }
@@ -3986,6 +4048,11 @@ impl HamplardContract {
             .instance()
             .set(&DataKey::DefaultFee, &new_fee_pct);
 
+        let ledger_sequence = env.ledger().sequence();
+        env.events().publish(
+            (Symbol::new(&env, "FeeUpdated"), admin.clone()),
+            (current_fee, new_fee_pct, admin.clone(), ledger_sequence),
+        );
         env.events().publish(
             (Symbol::new(&env, "default_fee_updated"), admin.clone()),
             (admin, new_fee_pct),
@@ -5873,9 +5940,25 @@ impl HamplardContract {
         );
     }
 
-    /// Complete a payment with a risk assessment.
-    /// This is a helper that calculates the fee breakdown for a given
-    /// payment and returns the `RiskFeeApplied` result.
+    /// Preview effective payment fee calculation with risk assessment.
+    ///
+    /// NOTE: This function is read-only and DOES NOT perform any token transfer
+    /// or mutate contract state. It calculates the fee breakdown (base fee,
+    /// dynamic discount, risk fee, final payment amount) identical to
+    /// `get_effective_fee_for_payment`.
+    pub fn preview_payment_fee(
+        env: Env,
+        student: Address,
+        token: Address,
+        payment_amount: i128,
+    ) -> RiskFeeApplied {
+        Self::get_effective_fee_for_payment(env, student, token, payment_amount)
+    }
+
+    /// Read-only fee preview calculation.
+    ///
+    /// NOTE: Despite the name, this function DOES NOT transfer tokens or mutate state.
+    /// It is a read-only helper identical to `preview_payment_fee` / `get_effective_fee_for_payment`.
     pub fn do_complete_payment(
         env: Env,
         student: Address,
