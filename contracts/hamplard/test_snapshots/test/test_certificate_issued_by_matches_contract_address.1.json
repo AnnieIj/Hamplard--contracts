@@ -261,7 +261,7 @@
                   "string": "COURSE-ISSUED-BY-001"
                 },
                 {
-                  "string": "proof"
+                  "bytes": "70726f6f66000000000000000000000000000000000000000000000000000000"
                 }
               ]
             }
@@ -629,6 +629,18 @@
                         "symbol": "archived_at_ledger"
                       },
                       "val": "void"
+                    },
+                    {
+                      "key": {
+                        "symbol": "capacity_mode"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "symbol": "Lifetime"
+                          }
+                        ]
+                      }
                     },
                     {
                       "key": {
@@ -1112,7 +1124,7 @@
                         "symbol": "evidence_hash"
                       },
                       "val": {
-                        "string": "proof"
+                        "bytes": "70726f6f66000000000000000000000000000000000000000000000000000000"
                       }
                     },
                     {

@@ -261,7 +261,7 @@
                   "string": "COURSE-CERT-ALLOW"
                 },
                 {
-                  "string": "evidence"
+                  "bytes": "65766964656e6365000000000000000000000000000000000000000000000000"
                 }
               ]
             }
@@ -648,6 +648,18 @@
                         "symbol": "archived_at_ledger"
                       },
                       "val": "void"
+                    },
+                    {
+                      "key": {
+                        "symbol": "capacity_mode"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "symbol": "Lifetime"
+                          }
+                        ]
+                      }
                     },
                     {
                       "key": {
@@ -1131,7 +1143,7 @@
                         "symbol": "evidence_hash"
                       },
                       "val": {
-                        "string": "evidence"
+                        "bytes": "65766964656e6365000000000000000000000000000000000000000000000000"
                       }
                     },
                     {

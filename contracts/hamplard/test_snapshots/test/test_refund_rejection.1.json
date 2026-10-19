@@ -284,7 +284,8 @@
                 },
                 {
                   "bool": false
-                }
+                },
+                "void"
               ]
             }
           },
@@ -416,6 +417,18 @@
                         "symbol": "archived_at_ledger"
                       },
                       "val": "void"
+                    },
+                    {
+                      "key": {
+                        "symbol": "capacity_mode"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "symbol": "Lifetime"
+                          }
+                        ]
+                      }
                     },
                     {
                       "key": {
@@ -1260,6 +1273,12 @@
                       "val": {
                         "string": "COURSE-REJECT"
                       }
+                    },
+                    {
+                      "key": {
+                        "symbol": "refund_amount"
+                      },
+                      "val": "void"
                     },
                     {
                       "key": {

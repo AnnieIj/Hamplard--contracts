@@ -261,7 +261,7 @@
                   "string": "COURSE-REENROLL-001"
                 },
                 {
-                  "string": "evidence_1"
+                  "bytes": "65766964656e63655f3100000000000000000000000000000000000000000000"
                 }
               ]
             }
@@ -467,6 +467,18 @@
                         "symbol": "archived_at_ledger"
                       },
                       "val": "void"
+                    },
+                    {
+                      "key": {
+                        "symbol": "capacity_mode"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "symbol": "Lifetime"
+                          }
+                        ]
+                      }
                     },
                     {
                       "key": {
@@ -1172,7 +1184,7 @@
                             "symbol": "evidence_hash"
                           },
                           "val": {
-                            "string": "evidence_1"
+                            "bytes": "65766964656e63655f3100000000000000000000000000000000000000000000"
                           }
                         },
                         {

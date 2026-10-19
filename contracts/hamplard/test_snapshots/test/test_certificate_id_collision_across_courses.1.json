@@ -324,7 +324,7 @@
                   "string": "COURSE-COLL-A"
                 },
                 {
-                  "string": "ev_a"
+                  "bytes": "65765f6100000000000000000000000000000000000000000000000000000000"
                 }
               ]
             }
@@ -484,7 +484,7 @@
                   "string": "COURSE-COLL-B"
                 },
                 {
-                  "string": "ev_b"
+                  "bytes": "65765f6200000000000000000000000000000000000000000000000000000000"
                 }
               ]
             }
@@ -798,6 +798,18 @@
                     },
                     {
                       "key": {
+                        "symbol": "capacity_mode"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "symbol": "Lifetime"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "categories"
                       },
                       "val": {
@@ -1023,6 +1035,18 @@
                         "symbol": "archived_at_ledger"
                       },
                       "val": "void"
+                    },
+                    {
+                      "key": {
+                        "symbol": "capacity_mode"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "symbol": "Lifetime"
+                          }
+                        ]
+                      }
                     },
                     {
                       "key": {
@@ -1599,7 +1623,7 @@
                         "symbol": "evidence_hash"
                       },
                       "val": {
-                        "string": "ev_a"
+                        "bytes": "65765f6100000000000000000000000000000000000000000000000000000000"
                       }
                     },
                     {
@@ -1770,7 +1794,7 @@
                         "symbol": "evidence_hash"
                       },
                       "val": {
-                        "string": "ev_b"
+                        "bytes": "65765f6200000000000000000000000000000000000000000000000000000000"
                       }
                     },
                     {

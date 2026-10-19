@@ -261,7 +261,7 @@
                   "string": "COURSE-CERT-EVENT-001"
                 },
                 {
-                  "string": "completion-proof"
+                  "bytes": "636f6d706c6574696f6e2d70726f6f6600000000000000000000000000000000"
                 }
               ]
             }
@@ -629,6 +629,18 @@
                         "symbol": "archived_at_ledger"
                       },
                       "val": "void"
+                    },
+                    {
+                      "key": {
+                        "symbol": "capacity_mode"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "symbol": "Lifetime"
+                          }
+                        ]
+                      }
                     },
                     {
                       "key": {
@@ -1112,7 +1124,7 @@
                         "symbol": "evidence_hash"
                       },
                       "val": {
-                        "string": "completion-proof"
+                        "bytes": "636f6d706c6574696f6e2d70726f6f6600000000000000000000000000000000"
                       }
                     },
                     {

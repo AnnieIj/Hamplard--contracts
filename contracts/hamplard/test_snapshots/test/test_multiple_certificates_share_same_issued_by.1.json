@@ -349,7 +349,7 @@
                   "string": "COURSE-MULTI-ISSUED-A"
                 },
                 {
-                  "string": "proof-a"
+                  "bytes": "70726f6f662d6100000000000000000000000000000000000000000000000000"
                 }
               ]
             }
@@ -484,7 +484,7 @@
                   "string": "COURSE-MULTI-ISSUED-B"
                 },
                 {
-                  "string": "proof-b"
+                  "bytes": "70726f6f662d6200000000000000000000000000000000000000000000000000"
                 }
               ]
             }
@@ -1031,6 +1031,18 @@
                     },
                     {
                       "key": {
+                        "symbol": "capacity_mode"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "symbol": "Lifetime"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "categories"
                       },
                       "val": {
@@ -1256,6 +1268,18 @@
                         "symbol": "archived_at_ledger"
                       },
                       "val": "void"
+                    },
+                    {
+                      "key": {
+                        "symbol": "capacity_mode"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "symbol": "Lifetime"
+                          }
+                        ]
+                      }
                     },
                     {
                       "key": {
@@ -1881,7 +1905,7 @@
                         "symbol": "evidence_hash"
                       },
                       "val": {
-                        "string": "proof-a"
+                        "bytes": "70726f6f662d6100000000000000000000000000000000000000000000000000"
                       }
                     },
                     {
@@ -2054,7 +2078,7 @@
                         "symbol": "evidence_hash"
                       },
                       "val": {
-                        "string": "proof-b"
+                        "bytes": "70726f6f662d6200000000000000000000000000000000000000000000000000"
                       }
                     },
                     {

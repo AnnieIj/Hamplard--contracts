@@ -378,7 +378,8 @@
                 },
                 {
                   "bool": true
-                }
+                },
+                "void"
               ]
             }
           },
@@ -607,6 +608,18 @@
                         "symbol": "archived_at_ledger"
                       },
                       "val": "void"
+                    },
+                    {
+                      "key": {
+                        "symbol": "capacity_mode"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "symbol": "Lifetime"
+                          }
+                        ]
+                      }
                     },
                     {
                       "key": {
@@ -1892,6 +1905,17 @@
                       },
                       "val": {
                         "string": "COURSE-001"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "refund_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 100000000
+                        }
                       }
                     },
                     {

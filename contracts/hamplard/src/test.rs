@@ -2552,7 +2552,7 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
     client.request_refund(&refund_student, &refund_course_id);
 
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.process_refund(&admin, &refund_student, &refund_course_id, &true);
+        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
     }));
     assert!(res.is_err(), "old admin must be rejected by process_refund");
 
@@ -4737,7 +4737,7 @@ fn test_refund_lifecycle() {
     // Approve refund
     let initial_balance = token::Client::new(&env, &token_id).balance(&student);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     let final_balance = token::Client::new(&env, &token_id).balance(&student);
     assert_eq!(final_balance - initial_balance, 1_000_000_000);
@@ -4802,7 +4802,7 @@ fn test_refund_rejection() {
 
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &false);
+    client.process_refund(&admin, &student, &course_id, &false, &None);
 
     let request = client.get_refund_request(&student, &course_id).unwrap();
     assert_eq!(request.status, RefundStatus::Rejected);
@@ -5420,7 +5420,7 @@ fn test_process_refund_event_includes_admin() {
     client.enroll(&student, &course_id);
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     let (event_student, event_course_id, event_approved, event_admin): (
         Address,
@@ -7548,6 +7548,7 @@ fn test_platform_counter_decrements_on_refund() {
         &student1,
         &String::from_str(&env, "COURSE-001"),
         &true,
+        &None,
     );
 
     // Counter should decrement
@@ -9917,6 +9918,7 @@ fn test_update_course_rejects_zero_max_capacity() {
         &String::from_str(&env, "COURSE-UPDATE-ZERO-CAP"),
         &None,
         &Some(Some(0u32)),
+        &None,
     );
 }
 
@@ -9941,7 +9943,7 @@ fn test_update_course_allows_unlimited_capacity_with_none() {
     assert_eq!(course.max_capacity, None);
 
     // A subsequent price-only update must leave unlimited capacity intact.
-    client.update_course(&instructor, &course_id, &Some(200_000_000i128), &None);
+    client.update_course(&instructor, &course_id, &Some(200_000_000i128), &None, &None);
     let course = client.get_course(&course_id).unwrap();
     assert_eq!(course.max_capacity, None);
     assert_eq!(course.price, 200_000_000);
@@ -11290,7 +11292,7 @@ fn test_process_refund_archives_enrollment_to_history() {
     // Request and approve the refund.
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     // The active enrollment must no longer exist.
     assert!(
@@ -11346,7 +11348,7 @@ fn test_re_enroll_rejects_before_enrollment_start_ledger() {
         &admin,
         &student,
         &course_id,
-        &Some(String::from_str(&env, "evidence")),
+        &Some(evidence_hash(&env, "evidence")),
     );
 
     // Instructor sets the enrollment start ledger in the future
@@ -11381,7 +11383,7 @@ fn test_re_enroll_succeeds_at_enrollment_start_ledger() {
         &admin,
         &student,
         &course_id,
-        &Some(String::from_str(&env, "evidence")),
+        &Some(evidence_hash(&env, "evidence")),
     );
 
     let enrollment_start = env.ledger().sequence() + 10;
@@ -11397,4 +11399,177 @@ fn test_re_enroll_succeeds_at_enrollment_start_ledger() {
         .unwrap();
     assert!(!enrollment.completed);
     assert_eq!(enrollment.enrolled_at_ledger, enrollment_start);
+}
+
+// ============================================================
+// Issue #364 — CapacityMode: Lifetime vs Concurrent
+// ============================================================
+
+/// Concurrent mode: a course capped at 2 active seats must reject a third
+/// enrollment while both seats are still active.
+#[test]
+#[should_panic(expected = "course has reached maximum enrollment capacity")]
+fn test_concurrent_capacity_blocks_enrollment_at_seat_cap() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) =
+        setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let course_id = String::from_str(&env, "COURSE-CONCURRENT-CAP");
+
+    // Register with max_capacity = 2, then switch to Concurrent mode.
+    client.register_course(
+        &instructor,
+        &course_id,
+        &100_000_000i128,
+        &token_id,
+        &0u32,
+        &Some(2u32),
+        &BytesN::from_array(&env, &[1u8; 32]),
+        &soroban_sdk::Vec::new(&env),
+    );
+    env.ledger().with_mut(|l| {
+        l.sequence_number += 1;
+    });
+    client.approve_course(&admin, &course_id);
+
+    // Switch capacity mode to Concurrent.
+    client.update_course(
+        &instructor,
+        &course_id,
+        &None,
+        &None,
+        &Some(crate::CapacityMode::Concurrent),
+    );
+
+    let asset_client = token::StellarAssetClient::new(&env, &token_id);
+    let student_a = Address::generate(&env);
+    let student_b = Address::generate(&env);
+    let student_c = Address::generate(&env);
+    asset_client.mint(&student_a, &1_000_000_000i128);
+    asset_client.mint(&student_b, &1_000_000_000i128);
+    asset_client.mint(&student_c, &1_000_000_000i128);
+
+    // Fill both concurrent seats.
+    client.enroll(&student_a, &course_id);
+    client.enroll(&student_b, &course_id);
+
+    // Third enrollment must be rejected — seats are all taken.
+    client.enroll(&student_c, &course_id);
+}
+
+/// Concurrent mode: completing a student frees their seat so the next
+/// student can enroll, even though lifetime total_enrollments exceeds the cap.
+#[test]
+fn test_concurrent_capacity_seat_freed_on_completion_allows_next_student() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) =
+        setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let course_id = String::from_str(&env, "COURSE-CONCURRENT-FREE");
+
+    // Register with max_capacity = 1.
+    client.register_course(
+        &instructor,
+        &course_id,
+        &100_000_000i128,
+        &token_id,
+        &0u32,
+        &Some(1u32),
+        &BytesN::from_array(&env, &[1u8; 32]),
+        &soroban_sdk::Vec::new(&env),
+    );
+    env.ledger().with_mut(|l| {
+        l.sequence_number += 1;
+    });
+    client.approve_course(&admin, &course_id);
+
+    // Switch to Concurrent mode.
+    client.update_course(
+        &instructor,
+        &course_id,
+        &None,
+        &None,
+        &Some(crate::CapacityMode::Concurrent),
+    );
+
+    let asset_client = token::StellarAssetClient::new(&env, &token_id);
+    let student_a = Address::generate(&env);
+    let student_b = Address::generate(&env);
+    asset_client.mint(&student_a, &1_000_000_000i128);
+    asset_client.mint(&student_b, &1_000_000_000i128);
+
+    // Student A takes the one seat.
+    client.enroll(&student_a, &course_id);
+
+    // Complete student A — frees the concurrent seat.
+    client.mark_completed(
+        &admin,
+        &student_a,
+        &course_id,
+        &Some(evidence_hash(&env, "proof")),
+    );
+
+    // Verify active_enrollments dropped to 0.
+    let course = client.get_course(&course_id).unwrap();
+    assert_eq!(course.active_enrollments, 0);
+    assert_eq!(course.total_enrollments, 1); // lifetime total unchanged
+
+    // Student B must now be admitted into the freed seat.
+    client.enroll(&student_b, &course_id);
+
+    let course = client.get_course(&course_id).unwrap();
+    assert_eq!(course.active_enrollments, 1);
+    assert_eq!(course.total_enrollments, 2); // lifetime grew past the cap — that's fine
+}
+
+/// Default Lifetime mode is unchanged: max_capacity still counts all-time
+/// total enrollments regardless of how many students have completed.
+#[test]
+#[should_panic(expected = "course has reached maximum enrollment capacity")]
+fn test_lifetime_capacity_default_unchanged_counts_completed_students() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) =
+        setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let course_id = String::from_str(&env, "COURSE-LIFETIME-CAP");
+
+    // Register with max_capacity = 1 — Lifetime mode by default.
+    client.register_course(
+        &instructor,
+        &course_id,
+        &100_000_000i128,
+        &token_id,
+        &0u32,
+        &Some(1u32),
+        &BytesN::from_array(&env, &[1u8; 32]),
+        &soroban_sdk::Vec::new(&env),
+    );
+    env.ledger().with_mut(|l| {
+        l.sequence_number += 1;
+    });
+    client.approve_course(&admin, &course_id);
+
+    // Confirm capacity_mode defaults to Lifetime.
+    let course = client.get_course(&course_id).unwrap();
+    assert_eq!(course.capacity_mode, crate::CapacityMode::Lifetime);
+
+    let asset_client = token::StellarAssetClient::new(&env, &token_id);
+    let student_a = Address::generate(&env);
+    let student_b = Address::generate(&env);
+    asset_client.mint(&student_a, &1_000_000_000i128);
+    asset_client.mint(&student_b, &1_000_000_000i128);
+
+    // Student A takes the one lifetime seat.
+    client.enroll(&student_a, &course_id);
+
+    // Complete student A — active_enrollments drops, but lifetime total stays at 1.
+    client.mark_completed(
+        &admin,
+        &student_a,
+        &course_id,
+        &Some(evidence_hash(&env, "proof")),
+    );
+
+    // In Lifetime mode this must still be rejected — total_enrollments == cap.
+    client.enroll(&student_b, &course_id);
 }
