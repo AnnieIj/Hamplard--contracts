@@ -11398,3 +11398,24 @@ fn test_re_enroll_succeeds_at_enrollment_start_ledger() {
     assert!(!enrollment.completed);
     assert_eq!(enrollment.enrolled_at_ledger, enrollment_start);
 }
+
+
+// Issue #442: bound the admin-configurable review period so approval remains possible.
+#[test]
+fn test_min_review_delay_accepts_maximum() {
+    let (env, contract_id, _, admin, _, _, _) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    client.update_min_review_delay(&admin, &120_960u32);
+    assert_eq!(client.get_min_review_delay(), 120_960u32);
+}
+
+#[test]
+fn test_min_review_delay_rejects_values_above_maximum_without_mutation() {
+    let (env, contract_id, _, admin, _, _, _) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    client.update_min_review_delay(&admin, &10u32);
+
+    assert!(client.try_update_min_review_delay(&admin, &120_961u32).is_err());
+    assert!(client.try_update_min_review_delay(&admin, &u32::MAX).is_err());
+    assert_eq!(client.get_min_review_delay(), 10u32);
+}
