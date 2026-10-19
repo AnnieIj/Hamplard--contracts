@@ -261,7 +261,7 @@
                   "string": "COURSE-NO-EXPIRY"
                 },
                 {
-                  "string": "late_evidence"
+                  "bytes": "6c6174655f65766964656e636500000000000000000000000000000000000000"
                 }
               ]
             }
@@ -408,6 +408,14 @@
                       },
                       "val": {
                         "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "co_instructors"
+                      },
+                      "val": {
+                        "vec": []
                       }
                     },
                     {
@@ -825,7 +833,7 @@
                         "symbol": "evidence_hash"
                       },
                       "val": {
-                        "string": "late_evidence"
+                        "bytes": "6c6174655f65766964656e636500000000000000000000000000000000000000"
                       }
                     },
                     {
