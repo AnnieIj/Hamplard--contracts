@@ -2147,6 +2147,27 @@ impl HamplardContract {
     // ENROLLMENT & PAYMENT
     // ----------------------------------------------------------
 
+    /// Quote the payment split for enrolling a student in a course.
+    ///
+    /// Returns `(price, platform_fee, instructor_share)` using the course's
+    /// token fee configuration, registration-time fee floor, and current risk
+    /// settings.
+    pub fn quote_enrollment(env: Env, course_id: String, student: Address) -> (i128, i128, i128) {
+        let course = Self::get_course_internal(&env, &course_id)
+            .unwrap_or_else(|| panic!("course not found"));
+        let (is_new_customer, is_btc_eth) = Self::resolve_risk_flags(&env, &student, &course.token);
+        let (instructor_share, platform_fee, _) = Self::calculate_enrollment_split(
+            &env,
+            &course.token,
+            course.price,
+            Self::course_fee_override_bps(&env, &course_id),
+            is_new_customer,
+            is_btc_eth,
+        );
+
+        (course.price, platform_fee, instructor_share)
+    }
+
     /// Student enrolls in a course and pays the fee.
     ///
     /// The payment is split automatically:
@@ -2464,15 +2485,14 @@ impl HamplardContract {
         // 1. Per-token fee configuration (map token → FeeConfig)
         // 2. Risk-based surcharges for large payments, new customers, and BTC/ETH
         // 3. Publishes RiskFeeApplied event when surcharge applies
-        // Risk flags come from the same helper the fee previews use, so a
-        // quote from get_effective_fee_for_payment() matches this charge.
+        // Quote and enrollment share the same risk flags and course-aware fee split.
         let (is_new_customer, is_btc_eth) = Self::resolve_risk_flags(env, student, &course.token);
         let course_fee_override_bps = Self::course_fee_override_bps(env, &course.id);
         let (instructor_amount, platform_amount) = Self::deduct_fee(
             env,
             &course.token,
             course.price,
-            Self::course_fee_override_bps(env, course_id),
+            course_fee_override_bps,
             is_new_customer,
             is_btc_eth,
         );
@@ -2751,7 +2771,7 @@ impl HamplardContract {
             env,
             &course.token,
             course.price,
-            Self::course_fee_override_bps(env, course_id),
+            course_fee_override_bps,
             false,
             false,
         );
@@ -2998,7 +3018,7 @@ impl HamplardContract {
             &env,
             &course.token,
             course.price,
-            Self::course_fee_override_bps(&env, &course_id),
+            course_fee_override_bps,
             is_new_customer,
             is_btc_eth,
         );
@@ -5869,8 +5889,36 @@ impl HamplardContract {
         is_new_customer: bool,
         is_btc_eth: bool,
     ) -> (i128, i128) {
+        let (net_amount, platform_fee, breakdown) = Self::calculate_enrollment_split(
+            env,
+            token,
+            amount,
+            course_fee_override_bps,
+            is_new_customer,
+            is_btc_eth,
+        );
+
+        if let Some(breakdown) = breakdown {
+            // Publish RiskFeeApplied event when a risk surcharge was applied.
+            if breakdown.risk_surcharge_bps > 0 {
+                env.events()
+                    .publish((Symbol::new(env, "risk_fee_applied"),), breakdown);
+            }
+        }
+
+        (net_amount, platform_fee)
+    }
+
+    fn calculate_enrollment_split(
+        env: &Env,
+        token: &Address,
+        amount: i128,
+        course_fee_override_bps: Option<u32>,
+        is_new_customer: bool,
+        is_btc_eth: bool,
+    ) -> (i128, i128, Option<RiskFeeApplied>) {
         if amount <= 0 {
-            return (0, 0);
+            return (0, 0, None);
         }
 
         let breakdown =
@@ -5887,13 +5935,7 @@ impl HamplardContract {
         };
         let net_amount = amount - platform_fee;
 
-        // Publish RiskFeeApplied event when a risk surcharge was applied
-        if breakdown.risk_surcharge_bps > 0 {
-            env.events()
-                .publish((Symbol::new(env, "risk_fee_applied"),), breakdown);
-        }
-
-        (net_amount, platform_fee)
+        (net_amount, platform_fee, Some(breakdown))
     }
 
     /// Escalate a dispute to arbitration. The caller must pay the

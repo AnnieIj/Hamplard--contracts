@@ -232,6 +232,7 @@ Initialises the contract. Called once by the deployer.
 |---|---|---|
 | `get_course(course_id)` | Full `Course` struct |
 | `get_enrollment(student, course_id)` | Full `Enrollment` struct |
+| `quote_enrollment(course_id, student)` | `(price, platform_fee, instructor_share)` using the current enrollment fee calculation |
 | `get_certificate(caller, certificate_id)` | Full `Certificate` struct (student, instructor, or admin only) |
 | `is_enrolled(student, course_id)` | `bool` |
 | `has_completed(student, course_id)` | `bool` |
@@ -257,6 +258,8 @@ Both transfers are atomic — if either fails, the whole transaction reverts. Th
 The platform fee percentage can be:
 - **Global default** (set at `init`, updatable by admin)
 - **Per-course override** (set by instructor at registration time, non-zero value)
+
+`quote_enrollment(course_id, student)` returns the current price and exact split that enrollment will use, including the course's fee override and applicable risk settings.
 
 ---
 

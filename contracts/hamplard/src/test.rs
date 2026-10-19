@@ -569,18 +569,27 @@ fn test_enroll_fee_honors_registered_override_as_floor() {
     env.ledger().with_mut(|l| {
         l.sequence_number += 1;
     });
-    client.enroll(&student, &String::from_str(&env, "COURSE-CUSTOM-FEE"));
+
+    let course_id = String::from_str(&env, "COURSE-CUSTOM-FEE");
+    let quote = client.quote_enrollment(&course_id, &student);
+    let platform_share = price * 40 / 100;
+    let instructor_share = price - platform_share;
+    assert_eq!(quote, (price, platform_share, instructor_share));
+
+    client.enroll(&student, &course_id);
 
     // Platform fee should be 40% (registered override), not 10% (live
     // default): the rate validated at register_course() is the rate charged.
-    let platform_share = price * 40 / 100;
-    let instructor_share = price - platform_share;
-
     assert_eq!(token_client.balance(&treasury), platform_share);
     assert_eq!(
         client.get_instructor_earnings(&instructor, &token_id),
         instructor_share,
     );
+    let enrollment = client
+        .get_enrollment(&student, &student, &course_id)
+        .unwrap();
+    assert_eq!(enrollment.platform_amount, quote.1);
+    assert_eq!(enrollment.instructor_amount, quote.2);
 }
 
 #[test]
@@ -9488,7 +9497,14 @@ fn test_fee_preview_matches_actual_enroll_deduction() {
         preview
     );
 
-    client.enroll(&student, &String::from_str(&env, "COURSE-FEE-PREVIEW"));
+    let course_id = String::from_str(&env, "COURSE-FEE-PREVIEW");
+    let quote = client.quote_enrollment(&course_id, &student);
+    assert_eq!(
+        quote,
+        (price, preview.platform_fee, price - preview.platform_fee)
+    );
+
+    client.enroll(&student, &course_id);
 
     // The preview must equal what enroll() actually deducted.
     assert_eq!(token_client.balance(&treasury), preview.platform_fee);
@@ -9497,13 +9513,10 @@ fn test_fee_preview_matches_actual_enroll_deduction() {
         price - preview.platform_fee,
     );
     let enrollment = client
-        .get_enrollment(
-            &student,
-            &student,
-            &String::from_str(&env, "COURSE-FEE-PREVIEW"),
-        )
+        .get_enrollment(&student, &student, &course_id)
         .unwrap();
     assert_eq!(enrollment.platform_amount, preview.platform_fee);
+    assert_eq!(enrollment.instructor_amount, quote.2);
 }
 
 #[test]
