@@ -830,7 +830,7 @@ impl HamplardContract {
 
         env.events().publish(
             (Symbol::new(&env, "enrollment_start_set"), course_id.clone()),
-            (course_id, enrollment_start_ledger),
+            (course_id.clone(), caller.clone(), env.ledger().sequence(), enrollment_start_ledger),
         );
     }
 
@@ -1139,7 +1139,7 @@ impl HamplardContract {
 
         env.events().publish(
             (Symbol::new(&env, "course_registered"), course_id.clone()),
-            course_id.clone(),
+            (course_id.clone(), instructor.clone(), env.ledger().sequence()),
         );
 
         course_id
@@ -1735,7 +1735,7 @@ impl HamplardContract {
 
         env.events().publish(
             (Symbol::new(&env, "course_archived"), course_id.clone()),
-            (course_id.clone(), admin1.clone(), admin2.clone()),
+            (course_id.clone(), admin1.clone(), admin2.clone(), env.ledger().sequence()),
         );
     }
 
@@ -2224,7 +2224,7 @@ impl HamplardContract {
 
         env.events().publish(
             (Symbol::new(&env, "batch_enrolled"), student.clone()),
-            (student, course_ids, total_paid),
+            (student, course_ids, total_paid, env.ledger().sequence()),
         );
 
         total_paid
@@ -3207,7 +3207,7 @@ impl HamplardContract {
 
         env.events().publish(
             (Symbol::new(&env, "earnings_withdrawn"), instructor.clone()),
-            (token, withdraw_amount, recipient),
+            (instructor.clone(), token, withdraw_amount, recipient, env.ledger().sequence()),
         );
     }
 
@@ -3360,7 +3360,7 @@ impl HamplardContract {
         let completion_ledger = env.ledger().sequence();
         env.events().publish(
             (Symbol::new(&env, "course_completed"), course_id.clone()),
-            (student, admin, completion_ledger),
+            (course_id.clone(), student, admin, completion_ledger),
         );
     }
 
@@ -3545,7 +3545,7 @@ impl HamplardContract {
                 Symbol::new(&env, "certificate_issued"),
                 certificate_id.clone(),
             ),
-            (student, course_id, admin, issued_at_ledger),
+            (certificate_id.clone(), student, course_id, admin, issued_at_ledger),
         );
 
         certificate_id
@@ -3806,8 +3806,10 @@ impl HamplardContract {
             .instance()
             .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
 
-        env.events()
-            .publish((Symbol::new(&env, "platform_paused"), admin.clone()), admin);
+        env.events().publish(
+            (Symbol::new(&env, "platform_paused"), admin.clone()),
+            (admin.clone(), env.ledger().sequence()),
+        );
     }
 
     pub fn unpause_platform(env: Env, admin: Address) {
@@ -3830,7 +3832,7 @@ impl HamplardContract {
 
         env.events().publish(
             (Symbol::new(&env, "platform_unpaused"), admin.clone()),
-            admin,
+            (admin.clone(), env.ledger().sequence()),
         );
     }
 
@@ -3873,7 +3875,7 @@ impl HamplardContract {
 
         env.events().publish(
             (Symbol::new(&env, "tokens_withdrawn"), admin1.clone()),
-            (admin1, admin2, token, amount, destination),
+            (admin1, admin2, token, amount, destination, env.ledger().sequence()),
         );
     }
 
@@ -3948,7 +3950,7 @@ impl HamplardContract {
 
         env.events().publish(
             (Symbol::new(&env, "admin_proposed"), new_admin.clone()),
-            (new_admin, admin1, admin2),
+            (new_admin, admin1, admin2, env.ledger().sequence()),
         );
     }
 
@@ -4113,7 +4115,7 @@ impl HamplardContract {
 
         env.events().publish(
             (Symbol::new(&env, "default_fee_updated"), admin.clone()),
-            (admin, new_fee_pct),
+            (admin, env.ledger().sequence(), new_fee_pct),
         );
     }
 
@@ -4127,7 +4129,7 @@ impl HamplardContract {
 
         env.events().publish(
             (Symbol::new(&env, "token_whitelisted"), admin.clone()),
-            (admin, token),
+            (admin, token, env.ledger().sequence()),
         );
     }
 
@@ -4188,7 +4190,7 @@ impl HamplardContract {
                 Symbol::new(&env, "token_removed_from_whitelist"),
                 admin.clone(),
             ),
-            (admin, token),
+            (admin, token, env.ledger().sequence()),
         );
     }
 
@@ -4252,7 +4254,7 @@ impl HamplardContract {
 
                         env.events().publish(
                             (Symbol::new(&env, "course_paused"), course_id.clone()),
-                            (course_id.clone(), Symbol::new(&env, "instructor_frozen")),
+                            (course_id.clone(), instructor.clone(), env.ledger().sequence()),
                         );
                     }
                 }
@@ -4348,7 +4350,7 @@ impl HamplardContract {
             .set(&DataKey::StudentBlocked(student.clone()), &true);
         env.events().publish(
             (Symbol::new(&env, "student_blocked"), student.clone()),
-            (student, admin),
+            (student, admin, env.ledger().sequence()),
         );
     }
 
@@ -4364,7 +4366,7 @@ impl HamplardContract {
             .remove(&DataKey::StudentBlocked(student.clone()));
         env.events().publish(
             (Symbol::new(&env, "student_unblocked"), student.clone()),
-            (student, admin),
+            (student, admin, env.ledger().sequence()),
         );
     }
 
@@ -4618,7 +4620,7 @@ impl HamplardContract {
 
         env.events().publish(
             (Symbol::new(&env, "refund_requested"), course_id.clone()),
-            (student, course_id, enrollment.amount_paid),
+            (student, course_id, enrollment.amount_paid, env.ledger().sequence()),
         );
     }
 
@@ -4766,7 +4768,7 @@ impl HamplardContract {
 
         env.events().publish(
             (Symbol::new(&env, "refund_processed"), course_id.clone()),
-            (student, course_id, approved, admin),
+            (student, course_id, approved, admin, env.ledger().sequence()),
         );
     }
 
