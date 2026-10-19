@@ -9,6 +9,7 @@ Hamplard is an online learning platform for practical vocational skills — tail
 Hamplard Contracts is the Soroban smart contract layer for the Hamplard platform. It manages course lifecycle state, enrollment payments, instructor revenue splits, certificate issuance, and revocation in a trustless and auditable way.
 
 The contract provides the core rules for:
+
 - registering and approving courses
 - pausing and unpausing courses
 - archiving courses permanently
@@ -18,11 +19,13 @@ The contract provides the core rules for:
 - emitting events for off-chain indexing and backend synchronization
 
 ### Main contract concepts
+
 - Courses move through a lifecycle from Pending to Active, Paused, and Archived.
 - Enrollments trigger automatic platform and instructor payment splits.
 - Certificates can be issued after completion and later revoked with metadata captured on-chain.
 
 ### Key features
+
 - multi-admin authorization for sensitive operations
 - course status enforcement and lifecycle rules
 - instructor earnings accounting
@@ -33,11 +36,11 @@ The detailed documentation below expands on the architecture, data model, contra
 
 This is **Repo 1 of 3** in the Hamplard project:
 
-| Repo | Description |
-|------|-------------|
-| `hamplard-contract` ← you are here | Soroban smart contract (Rust) |
-| `hamplard-backend` | NestJS REST API + content management |
-| `hamplard-frontend` | Next.js student and instructor portal |
+| Repo                               | Description                           |
+| ---------------------------------- | ------------------------------------- |
+| `hamplard-contract` ← you are here | Soroban smart contract (Rust)         |
+| `hamplard-backend`                 | NestJS REST API + content management  |
+| `hamplard-frontend`                | Next.js student and instructor portal |
 
 ---
 
@@ -71,6 +74,7 @@ Instructors register courses on-chain with a price and fee structure. Each cours
 
 **2. Enrollment Payments**
 When a student enrolls, the contract automatically splits the payment in a single transaction:
+
 - Platform fee → treasury address
 - Instructor share → instructor address directly
 
@@ -85,15 +89,15 @@ After a student completes a course (verified off-chain by the backend), the admi
 
 The contract intentionally stores only what is necessary for payments and verification. Everything else lives in the backend database:
 
-| Off-chain (backend) | On-chain (contract) |
-|---|---|
-| Video lessons | Course ID, price, instructor address |
-| Course descriptions | Total enrollments, total earned |
-| Assignments | Enrollment records |
-| Student progress % | Completion status |
-| Downloadable resources | Certificate with course title |
-| User profiles | — |
-| Instructor analytics | — |
+| Off-chain (backend)    | On-chain (contract)                  |
+| ---------------------- | ------------------------------------ |
+| Video lessons          | Course ID, price, instructor address |
+| Course descriptions    | Total enrollments, total earned      |
+| Assignments            | Enrollment records                   |
+| Student progress %     | Completion status                    |
+| Downloadable resources | Certificate with course title        |
+| User profiles          | —                                    |
+| Instructor analytics   | —                                    |
 
 This keeps the contract small, cheap to call, and focused on what blockchains are actually good at: verifiable ownership, trustless payments, and permanent records.
 
@@ -120,12 +124,12 @@ This keeps the contract small, cheap to call, and focused on what blockchains ar
 
 ### Roles
 
-| Role | Address | Permissions |
-|------|---------|-------------|
-| **Admin** | Set at `init` | Approve/archive courses, mark completions, issue/revoke certificates, update fee |
-| **Instructor** | Set per course | Register courses, pause/unpause their own courses |
-| **Student** | Any address | Enroll in active courses |
-| **Treasury** | Set at `init` | Receives platform fee share (passive recipient only) |
+| Role           | Address        | Permissions                                                                      |
+| -------------- | -------------- | -------------------------------------------------------------------------------- |
+| **Admin**      | Set at `init`  | Approve/archive courses, mark completions, issue/revoke certificates, update fee |
+| **Instructor** | Set per course | Register courses, pause/unpause their own courses                                |
+| **Student**    | Any address    | Enroll in active courses                                                         |
+| **Treasury**   | Set at `init`  | Receives platform fee share (passive recipient only)                             |
 
 ---
 
@@ -142,6 +146,8 @@ pub struct Course {
     pub token: Address,                // USDC Stellar Asset Contract
     pub total_enrollments: u32,
     pub total_earned: i128,
+    pub total_refunded: i128,          // cumulative USDC refunded (process_refund + archive_course)
+    pub refund_count: u32,             // number of refunded enrollments
     pub status: CourseStatus,          // Pending | Active | Paused | Archived
     pub created_at_ledger: u32,
 }
@@ -188,43 +194,44 @@ Active  ── archive_course() ──→ Archived (admin only, permanent)
 ## Contract Functions
 
 ### `init(admin, treasury, default_fee_pct)`
+
 Initialises the contract. Called once by the deployer.
 
 ### Course management
 
-| Function | Caller | Description |
-|---|---|---|
-| `register_course(instructor, course_id, price, token, platform_fee_pct)` | Instructor | Register a course — starts as Pending |
-| `approve_course(admin, course_id)` | Admin | Move Pending → Active |
-| `pause_course(caller, course_id)` | Admin or Instructor | Move Active → Paused |
-| `unpause_course(caller, course_id)` | Admin or Instructor | Move Paused → Active |
-| `archive_course(admin, course_id)` | Admin only | Permanently archive |
+| Function                                                                 | Caller              | Description                           |
+| ------------------------------------------------------------------------ | ------------------- | ------------------------------------- |
+| `register_course(instructor, course_id, price, token, platform_fee_pct)` | Instructor          | Register a course — starts as Pending |
+| `approve_course(admin, course_id)`                                       | Admin               | Move Pending → Active                 |
+| `pause_course(caller, course_id)`                                        | Admin or Instructor | Move Active → Paused                  |
+| `unpause_course(caller, course_id)`                                      | Admin or Instructor | Move Paused → Active                  |
+| `archive_course(admin, course_id)`                                       | Admin only          | Permanently archive                   |
 
 ### Enrollment
 
-| Function | Caller | Description |
-|---|---|---|
+| Function                     | Caller  | Description                               |
+| ---------------------------- | ------- | ----------------------------------------- |
 | `enroll(student, course_id)` | Student | Pay and enroll. Splits payment instantly. |
 
 ### Completion & Certificates
 
-| Function | Caller | Description |
-|---|---|---|
-| `mark_completed(admin, student, course_id, evidence_hash)` | Admin | Called after backend verifies all lessons done. A non-empty `evidence_hash` replaces the student co-signature. |
-| `issue_certificate(admin, student, course_id, cert_id, course_title, enrollment_reference, expires_at_ledger, instructor_signature)` | Admin | Issues on-chain certificate. Requires completion. `enrollment_reference` is a free-form backend ID (e.g. UUID). |
-| `revoke_certificate(admin, cert_id)` | Admin | Flags certificate as revoked |
-| `mark_completed(admin, student, course_id)` | Admin | Called after backend verifies all lessons done |
-| `issue_certificate(admin, cert_id, student, course_id, course_title)` | Admin | Issues on-chain certificate. Requires completion. |
-| `revoke_certificate(admin, cert_id, reason)` | Admin | Flags certificate as revoked |
-| `bulk_revoke_course_certificates(admin, course_id)` | Admin | Flags every certificate of a course as revoked in one transaction |
+| Function                                                                                                                             | Caller | Description                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ------ | --------------------------------------------------------------------------------------------------------------- |
+| `mark_completed(admin, student, course_id, evidence_hash)`                                                                           | Admin  | Called after backend verifies all lessons done. A non-empty `evidence_hash` replaces the student co-signature.  |
+| `issue_certificate(admin, student, course_id, cert_id, course_title, enrollment_reference, expires_at_ledger, instructor_signature)` | Admin  | Issues on-chain certificate. Requires completion. `enrollment_reference` is a free-form backend ID (e.g. UUID). |
+| `revoke_certificate(admin, cert_id)`                                                                                                 | Admin  | Flags certificate as revoked                                                                                    |
+| `mark_completed(admin, student, course_id)`                                                                                          | Admin  | Called after backend verifies all lessons done                                                                  |
+| `issue_certificate(admin, cert_id, student, course_id, course_title)`                                                                | Admin  | Issues on-chain certificate. Requires completion.                                                               |
+| `revoke_certificate(admin, cert_id, reason)`                                                                                         | Admin  | Flags certificate as revoked                                                                                    |
+| `bulk_revoke_course_certificates(admin, course_id)`                                                                                  | Admin  | Flags every certificate of a course as revoked in one transaction                                               |
 
 ### Admin management
 
-| Function | Caller | Description |
-|---|---|---|
-| `transfer_admin(current_admin, new_admin)` | Admin | Transfer admin role |
-| `update_treasury(admin, new_treasury)` | Admin | Update treasury address |
-| `update_default_fee(admin, new_fee_pct)` | Admin | Update default platform fee |
+| Function                                   | Caller | Description                 |
+| ------------------------------------------ | ------ | --------------------------- |
+| `transfer_admin(current_admin, new_admin)` | Admin  | Transfer admin role         |
+| `update_treasury(admin, new_treasury)`     | Admin  | Update treasury address     |
+| `update_default_fee(admin, new_fee_pct)`   | Admin  | Update default platform fee |
 
 ### Read-only queries
 
@@ -255,6 +262,7 @@ instructor_amount = 100 - 20       = 80 USDC → instructor
 Both transfers are atomic — if either fails, the whole transaction reverts. The student is never charged without the instructor and treasury being paid.
 
 The platform fee percentage can be:
+
 - **Global default** (set at `init`, updatable by admin)
 - **Per-course override** (set by instructor at registration time, non-zero value)
 
@@ -278,19 +286,19 @@ Returns `true` if the certificate exists and has not been revoked. The `get_cert
 
 ## Events
 
-| Event name | Payload | When |
-|---|---|---|
-| `course_registered` | `course_id` | Instructor registers a course |
-| `course_approved` | `course_id` | Admin approves a course |
-| `course_paused` | `course_id` | Course paused |
-| `course_unpaused` | `course_id` | Course unpaused |
-| `course_archived` | `course_id` | Course archived |
-| `student_enrolled` | `(course_id, student, amount_paid)` | Student enrolls and pays |
-| `course_completed` | `(course_id, student)` | Completion marked by admin |
-| `certificate_issued` | `(certificate_id, student, course_id)` | Certificate issued |
-| `certificate_revoked` | `certificate_id` | Certificate revoked |
+| Event name                    | Payload                                     | When                                      |
+| ----------------------------- | ------------------------------------------- | ----------------------------------------- |
+| `course_registered`           | `course_id`                                 | Instructor registers a course             |
+| `course_approved`             | `course_id`                                 | Admin approves a course                   |
+| `course_paused`               | `course_id`                                 | Course paused                             |
+| `course_unpaused`             | `course_id`                                 | Course unpaused                           |
+| `course_archived`             | `course_id`                                 | Course archived                           |
+| `student_enrolled`            | `(course_id, student, amount_paid)`         | Student enrolls and pays                  |
+| `course_completed`            | `(course_id, student)`                      | Completion marked by admin                |
+| `certificate_issued`          | `(certificate_id, student, course_id)`      | Certificate issued                        |
+| `certificate_revoked`         | `certificate_id`                            | Certificate revoked                       |
 | `course_certificates_revoked` | `(admin, course_id, revoked_count, ledger)` | All certificates of a course bulk-revoked |
-| `admin_transferred` | `new_admin` | Admin role transferred |
+| `admin_transferred`           | `new_admin`                                 | Admin role transferred                    |
 
 The backend listens to these events and updates the database, sends notifications, and triggers email confirmations.
 
@@ -351,6 +359,7 @@ cargo test test_full_lifecycle     # single test
 ```
 
 Expected:
+
 ```
 running 14 tests
 test test::test_approve_already_active_course ........... ok
