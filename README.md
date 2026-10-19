@@ -70,11 +70,11 @@ The Hamplard contract is the trust layer for the platform. It handles three resp
 Instructors register courses on-chain with a price and fee structure. Each course starts as `Pending` — an admin must approve it before students can enroll. This gives the platform moderation control without being able to move anyone's funds.
 
 **2. Enrollment Payments**
-When a student enrolls, the contract automatically splits the payment in a single transaction:
-- Platform fee → treasury address
-- Instructor share → instructor address directly
+When a student enrolls, the full course price is transferred from the student to the contract in a single atomic transaction, where it is split:
+- Platform fee → forwarded to the treasury address immediately
+- Instructor share → credited to the instructor's on-chain earnings balance, held by the contract until the instructor pulls it via `withdraw_earnings()`
 
-No escrow needed — the payment splits and lands in both wallets immediately. The contract records the enrollment so no student can enroll twice.
+The contract does not escrow student funds beyond the enrollment transaction — only the instructor's share waits to be withdrawn. The contract records the enrollment so no student can enroll twice.
 
 **3. On-Chain Certificates**
 After a student completes a course (verified off-chain by the backend), the admin issues an on-chain certificate. Each certificate is a permanent, verifiable record tied to the student's Stellar address and the course. Anyone can verify a certificate by querying `verify_certificate(certificate_id)` — no trusted middleman needed. Certificates can be revoked by the admin if issued in error.
@@ -242,21 +242,52 @@ Initialises the contract. Called once by the deployer.
 
 ## Revenue Split Logic
 
-When a student calls `enroll()`, the contract calculates the split and executes both transfers in the same transaction:
+When a student calls `enroll()`, the full course price is transferred from the student to the contract atomically. The contract then splits it in the same transaction:
+
+1. The **platform fee** is forwarded to the treasury address immediately.
+2. The **instructor share** is credited to `InstructorEarnings[instructor][token]` — a pull-based withdrawal model. The funds sit in the contract until the instructor withdraws them.
 
 ```
-price = 100 USDC
-platform_fee_percent = 20
+price               = 100 USDC
+fee_bps             = 2000   (20%)
 
-platform_amount   = 100 × 20 / 100 = 20 USDC → treasury
-instructor_amount = 100 - 20       = 80 USDC → instructor
+platform_fee        = 100 × 2000 / 10000 = 20 USDC → treasury (at enroll time)
+instructor_earnings = 100 − 20            = 80 USDC → credited to InstructorEarnings
 ```
 
-Both transfers are atomic — if either fails, the whole transaction reverts. The student is never charged without the instructor and treasury being paid.
+The whole operation is atomic — if the student's transfer or the treasury transfer fails, the transaction reverts and no enrollment is recorded. The split uses integer arithmetic (`platform_fee = price × bps / 10000`); any truncation remainder stays with the instructor share.
 
-The platform fee percentage can be:
-- **Global default** (set at `init`, updatable by admin)
-- **Per-course override** (set by instructor at registration time, non-zero value)
+### Fee configuration (bps-based)
+
+The platform fee is expressed in **basis points** (10 000 bps = 100%):
+
+- **Per-token config** — `set_fee_config(admin, token, fee_bps)` sets different rates per approved token.
+- **Global default** — tokens without a per-token override fall back to the default fee percentage set at `init` (converted to bps; `get_fee_config(token)` shows the effective value).
+- **Course floor** — a non-zero `platform_fee_pct` recorded by the instructor at registration acts as a *floor*: the live fee may be higher, never lower.
+- **Risk surcharges** — when risk pricing is enabled (`set_risk_fee_config`), extra bps are added for large payments, new customers (first enrollment), and BTC/ETH tokens. The effective fee is capped at 100%. A `risk_fee_applied` event is emitted whenever a surcharge applies, and a preview from `get_effective_fee_for_payment(...)` matches the charge at enrollment.
+
+### Instructor withdrawals (pull model)
+
+Instructors are **not** paid directly at enrollment. They withdraw their accumulated balance themselves:
+
+```bash
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --source instructor-account \
+  --network testnet \
+  -- withdraw_earnings \
+  --instructor <INSTRUCTOR_ADDRESS> \
+  --token <USDC_SAC_ADDRESS> \
+  --amount 0
+```
+
+- `amount = 0` withdraws the full available balance; a positive amount withdraws partially.
+- An optional `destination` address receives the funds — only the instructor must sign.
+- Balances are readable via `get_instructor_earnings(instructor, token)` and `get_instructor_total_earnings(instructor)`.
+
+### Co-instructors
+
+Courses can declare co-instructors with an individual revenue share in basis points via the `CoInstructor { address, share_bps }` type (0–10000 bps each). Note that on the current contract the full instructor share is still credited to the course's primary instructor — the co-instructor split is declared in the type system but not yet applied during enrollment.
 
 ---
 
