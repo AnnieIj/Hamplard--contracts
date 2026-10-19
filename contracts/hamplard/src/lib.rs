@@ -1,3 +1,4 @@
+//! Event name constants live in `events.rs` and are re-exported here.
 //! # Hamplard Contract — Security Model
 //!
 //! ## Trust Hierarchy
@@ -110,6 +111,8 @@ extern crate std;
 use soroban_sdk::{
     contract, contractimpl, contracttype, token, Address, BytesN, Env, Map, String, Symbol, Vec,
 };
+
+mod events;
 
 // ============================================================
 // FEE & RISK DATA TYPES
