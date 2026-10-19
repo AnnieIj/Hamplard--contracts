@@ -229,14 +229,22 @@ Initialises the contract. Called once by the deployer.
 ### Read-only queries
 
 | Function | Returns |
-|---|---|---|
-| `get_course(course_id)` | Full `Course` struct |
-| `get_enrollment(student, course_id)` | Full `Enrollment` struct |
+|---|---|
+| `get_course(course_id)` | `Option<Course>` — full `Course` struct, or `None` if not found |
+| `get_enrollment(caller, student, course_id)` | `Option<Enrollment>` — full `Enrollment` struct (student, course instructor, or admin only) |
+| `get_enrollment_history(caller, student, course_id)` | `Vec<Enrollment>` — archived past attempts from `re_enroll()` (same access rules as `get_enrollment`) |
 | `get_certificate(caller, certificate_id)` | Full `Certificate` struct (student, instructor, or admin only) |
+| `get_course_certificates(course_id)` | `Vec<String>` — certificate IDs issued for a course, in issuance order |
 | `is_enrolled(student, course_id)` | `bool` |
-| `has_completed(student, course_id)` | `bool` |
-| `verify_certificate(certificate_id)` | `bool` — true if exists and not revoked |
-| `get_platform_fee()` | `u32` — current default fee % |
+| `has_completed(student, course_id)` | `Option<bool>` — `None` if no enrollment, `Some(false)` if enrolled but not completed (or expired), `Some(true)` if completed |
+| `verify_certificate(certificate_id)` | `bool` — true if it exists, is not revoked, and has not expired |
+| `list_courses(offset, limit)` | `Vec<String>` — paginated page of course IDs from the on-chain catalog |
+| `get_student_enrollment_count(student)` | `u32` — total enrollments the student has ever created |
+| `get_courses_by_instructor(instructor)` | `Vec<String>` — every course the instructor has registered |
+| `get_instructor_earnings(instructor, token)` | `i128` — accumulated earnings for an instructor and token |
+| `get_instructor_total_earnings(instructor)` | `i128` — accumulated earnings across all tokens |
+| `get_instructor_stats(instructor)` | `InstructorStats` — total students, completions, and certificates issued |
+| `get_platform_fee(admin)` | `u32` — current default fee % (admin only) |
 
 ---
 
