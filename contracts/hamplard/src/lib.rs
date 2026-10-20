@@ -802,12 +802,7 @@ impl HamplardContract {
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| panic!("course not found"));
 
-        let is_admin = Self::is_admin(&env, &caller);
-        let is_instructor = caller == course.instructor;
-
-        if !is_admin && !is_instructor {
-            panic!("unauthorized");
-        }
+        Self::require_admin_or_instructor(&env, &caller, &course);
 
         if Self::is_instructor_frozen_internal(&env, &course.instructor) {
             panic!("instructor is frozen");
@@ -1330,12 +1325,7 @@ impl HamplardContract {
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| panic!("course not found"));
 
-        let is_admin = Self::is_admin(&env, &caller);
-        let is_instructor = caller == course.instructor;
-
-        if !is_admin && !is_instructor {
-            panic!("unauthorized");
-        }
+        Self::require_admin_or_instructor(&env, &caller, &course);
 
         env.storage()
             .instance()
@@ -1374,16 +1364,11 @@ impl HamplardContract {
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| panic!("course not found"));
 
-        let is_admin = Self::is_admin(&env, &caller);
-        let is_instructor = caller == course.instructor;
-
-        if !is_admin && !is_instructor {
-            panic!("unauthorized");
-        }
+        Self::require_admin_or_instructor(&env, &caller, &course);
 
         // freeze_instructor() auto-pauses the instructor's courses; a frozen
         // instructor must not be able to undo that by unpausing them.
-        if !is_admin && Self::is_instructor_frozen_internal(&env, &course.instructor) {
+        if !Self::is_admin(&env, &caller) && Self::is_instructor_frozen_internal(&env, &course.instructor) {
             panic!("instructor is frozen");
         }
 
@@ -1754,12 +1739,7 @@ impl HamplardContract {
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| panic!("course not found"));
 
-        let is_admin = Self::is_admin(&env, &caller);
-        let is_instructor = caller == course.instructor;
-
-        if !is_admin && !is_instructor {
-            panic!("unauthorized");
-        }
+        Self::require_admin_or_instructor(&env, &caller, &course);
 
         if Self::is_instructor_frozen_internal(&env, &course.instructor) {
             panic!("instructor is frozen");
@@ -1823,12 +1803,7 @@ impl HamplardContract {
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| panic!("course not found"));
 
-        let is_admin = Self::is_admin(&env, &caller);
-        let is_instructor = caller == course.instructor;
-
-        if !is_admin && !is_instructor {
-            panic!("unauthorized");
-        }
+        Self::require_admin_or_instructor(&env, &caller, &course);
 
         if Self::is_instructor_frozen_internal(&env, &course.instructor) {
             panic!("instructor is frozen");
@@ -1876,14 +1851,9 @@ impl HamplardContract {
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| panic!("course not found"));
 
-        let is_admin = Self::is_admin(&env, &caller);
-        let is_instructor = caller == course.instructor;
+        Self::require_admin_or_instructor(&env, &caller, &course);
 
-        if !is_admin && !is_instructor {
-            panic!("unauthorized");
-        }
-
-        if !is_admin && Self::is_instructor_frozen_internal(&env, &course.instructor) {
+        if !Self::is_admin(&env, &caller) && Self::is_instructor_frozen_internal(&env, &course.instructor) {
             panic!("instructor is frozen");
         }
 
@@ -1921,12 +1891,7 @@ impl HamplardContract {
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| panic!("course not found"));
 
-        let is_admin = Self::is_admin(&env, &caller);
-        let is_instructor = caller == course.instructor;
-
-        if !is_admin && !is_instructor {
-            panic!("unauthorized");
-        }
+        Self::require_admin_or_instructor(&env, &caller, &course);
 
         if Self::is_instructor_frozen_internal(&env, &course.instructor) {
             panic!("instructor is frozen");
@@ -1974,14 +1939,9 @@ impl HamplardContract {
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| panic!("course not found"));
 
-        let is_admin = Self::is_admin(&env, &caller);
-        let is_instructor = caller == course.instructor;
+        Self::require_admin_or_instructor(&env, &caller, &course);
 
-        if !is_admin && !is_instructor {
-            panic!("unauthorized");
-        }
-
-        if !is_admin && Self::is_instructor_frozen_internal(&env, &course.instructor) {
+        if !Self::is_admin(&env, &caller) && Self::is_instructor_frozen_internal(&env, &course.instructor) {
             panic!("instructor is frozen");
         }
 
@@ -2046,16 +2006,11 @@ impl HamplardContract {
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| panic!("course not found"));
 
-        let is_admin = Self::is_admin(&env, &caller);
-        let is_instructor = caller == course.instructor;
-
-        if !is_admin && !is_instructor {
-            panic!("unauthorized");
-        }
+        Self::require_admin_or_instructor(&env, &caller, &course);
 
         // A frozen instructor may not alter the content commitment, but an
         // admin may still update it as an administrative intervention.
-        if !is_admin && Self::is_instructor_frozen_internal(&env, &course.instructor) {
+        if !Self::is_admin(&env, &caller) && Self::is_instructor_frozen_internal(&env, &course.instructor) {
             panic!("instructor is frozen");
         }
 
@@ -2104,12 +2059,7 @@ impl HamplardContract {
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| panic!("course not found"));
 
-        let is_admin = Self::is_admin(&env, &caller);
-        let is_instructor = caller == course.instructor;
-
-        if !is_admin && !is_instructor {
-            panic!("unauthorized");
-        }
+        Self::require_admin_or_instructor(&env, &caller, &course);
 
         if Self::is_instructor_frozen_internal(&env, &course.instructor) {
             panic!("instructor is frozen");
@@ -5365,6 +5315,31 @@ impl HamplardContract {
 
         // Check if admin role has expired (approvers don't expire)
         if Self::is_admin(env, caller) {
+            if let Some(expires_at) = env
+                .storage()
+                .instance()
+                .get::<DataKey, u32>(&DataKey::AdminExpiresAt)
+            {
+                if env.ledger().sequence() >= expires_at {
+                    panic!("admin role has expired");
+                }
+            }
+        }
+    }
+
+    /// Require that caller is the course instructor or the platform admin.
+    /// Panics with "unauthorized" otherwise. Also enforces the admin-expiry
+    /// rule when the caller is an admin.
+    fn require_admin_or_instructor(env: &Env, caller: &Address, course: &Course) {
+        let is_admin = Self::is_admin(env, caller);
+        let is_instructor = caller == &course.instructor;
+
+        if !is_admin && !is_instructor {
+            panic!("unauthorized");
+        }
+
+        // Check if admin role has expired
+        if is_admin {
             if let Some(expires_at) = env
                 .storage()
                 .instance()
