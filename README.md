@@ -318,17 +318,28 @@ hamplard-contract/
 ## Prerequisites
 
 ```bash
-# Rust + wasm32 target
+# 1. Install rustup (if not already installed)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-rustup target add wasm32v1-none
 
-# Stellar CLI
+# 2. The correct Rust toolchain and wasm32v1-none target are declared in
+#    rust-toolchain.toml at the repo root. rustup picks them up automatically
+#    on the first cargo command — no manual rustup target add needed.
+#
+#    Pinned toolchain: 1.84.0  (matches soroban-sdk =22.0.11 rust_version)
+#    Target:           wasm32v1-none
+
+# 3. Stellar CLI
 cargo install --locked stellar-cli --features opt
 
-# Testnet account
+# 4. Testnet account
 stellar keys generate --global my-account --network testnet
 stellar keys fund my-account --network testnet
 ```
+
+> **Toolchain pinning** — `rust-toolchain.toml` pins Rust to `1.84.0` and
+> `soroban-sdk` is pinned to `=22.0.11` in `Cargo.toml`. Together with
+> `Cargo.lock` this guarantees identical builds across machines and CI.
+> When upgrading the SDK, update both files together.
 
 ---
 
