@@ -278,19 +278,30 @@ Returns `true` if the certificate exists and has not been revoked. The `get_cert
 
 ## Events
 
-| Event name | Payload | When |
-|---|---|---|
-| `course_registered` | `course_id` | Instructor registers a course |
-| `course_approved` | `course_id` | Admin approves a course |
-| `course_paused` | `course_id` | Course paused |
-| `course_unpaused` | `course_id` | Course unpaused |
-| `course_archived` | `course_id` | Course archived |
-| `student_enrolled` | `(course_id, student, amount_paid)` | Student enrolls and pays |
-| `course_completed` | `(course_id, student)` | Completion marked by admin |
-| `certificate_issued` | `(certificate_id, student, course_id)` | Certificate issued |
-| `certificate_revoked` | `certificate_id` | Certificate revoked |
-| `course_certificates_revoked` | `(admin, course_id, revoked_count, ledger)` | All certificates of a course bulk-revoked |
-| `admin_transferred` | `new_admin` | Admin role transferred |
+All events are emitted with a topics tuple `(symbol_short!("<event_name>"), ...)` and a data payload. The table below lists every event emitted by the contract, its topics, its data layout, and when it fires. Event names and payloads mirror the `env.events().publish(...)` calls in `contracts/hamplard/src/lib.rs`.
+
+| Event name | Topics | Data | When |
+|---|---|---|---|
+| `course_registered` | `("course_registered", instructor, course_id)` | `price: i128` | Instructor registers a course (starts `Pending`) |
+| `course_approved` | `("course_approved", admin, course_id)` | `()` | Admin approves a course (`Pending` → `Active`) |
+| `course_paused` | `("course_paused", caller, course_id)` | `()` | Admin or instructor pauses a course (`Active` → `Paused`) |
+| `course_unpaused` | `("course_unpaused", caller, course_id)` | `()` | Admin or instructor unpauses a course (`Paused` → `Active`) |
+| `course_archived` | `("course_archived", admin, course_id)` | `()` | Admin permanently archives a course |
+| `course_rejected` | `("course_rejected", admin, course_id)` | `reason: String` | Admin rejects a pending course |
+| `student_enrolled` | `("student_enrolled", student, course_id)` | `(amount_paid: i128, platform_amount: i128, instructor_amount: i128)` | Student enrolls and payment is split |
+| `enrollment_failed` | `("enrollment_failed", student, course_id)` | `reason: String` | Enrollment attempt fails (e.g. course not active, duplicate) |
+| `course_completed` | `("course_completed", admin, student, course_id)` | `evidence_hash: String` | Admin marks an enrollment complete |
+| `certificate_issued` | `("certificate_issued", student, cert_id)` | `(course_id: String, course_title: String, expires_at_ledger: u32)` | Admin issues an on-chain certificate |
+| `certificate_revoked` | `("certificate_revoked", admin, cert_id)` | `reason: String` | Admin revokes a certificate |
+| `course_certificates_revoked` | `("course_certificates_revoked", admin, course_id)` | `(revoked_count: u32, ledger: u32)` | All certificates of a course bulk-revoked |
+| `refund_requested` | `("refund_requested", student, course_id)` | `amount: i128` | Student requests a refund for an enrollment |
+| `refund_processed` | `("refund_processed", admin, student, course_id)` | `(amount: i128, approved: bool)` | Admin processes a refund request |
+| `treasury_updated` | `("treasury_updated", admin)` | `(old_treasury: Address, new_treasury: Address)` | Admin updates the treasury address |
+| `default_fee_updated` | `("default_fee_updated", admin)` | `(old_fee_pct: u32, new_fee_pct: u32)` | Admin updates the default platform fee |
+| `co_instructors_updated` | `("co_instructors_updated", instructor, course_id)` | `co_instructors: Vec<Address>` | Instructor updates the co-instructor list for a course |
+| `risk_fee_applied` | `("risk_fee_applied", course_id)` | `(risk_fee_pct: u32, applied_to: Address)` | Contract applies a risk fee on enrollment |
+| `dispute_escalated` | `("dispute_escalated", student, course_id)` | `(reason: String, ledger: u32)` | Student escalates a dispute to the admin |
+| `admin_transferred` | `("admin_transferred", current_admin)` | `new_admin: Address` | Admin role transferred |
 
 The backend listens to these events and updates the database, sends notifications, and triggers email confirmations.
 
@@ -441,6 +452,7 @@ stellar contract invoke \
 - **Certificate immutability**: Revoked certificates are flagged — not deleted. This preserves the audit trail and prevents a revocation from being hidden.
 - **Admin is a single address**: For production, consider using a multi-sig wallet as the admin address to avoid a single point of failure.
 - **Fee validation**: Platform fee percentage is validated to be ≤ 100 at both `init` and `register_course` time.
+- **Event schema stability**: Event topics and data layouts are part of the public interface. Off-chain indexers must be updated in lockstep with any contract change to the events table above.
 
 ---
 
@@ -452,6 +464,7 @@ stellar contract invoke \
 - [x] Course pause/unpause by instructor or admin
 - [x] Certificate revocation
 - [x] 14+ unit tests
+- [x] Full event coverage documented (see [Events](#events))
 - [ ] Discount codes / coupon system (Soroban-based)
 - [ ] Subscription enrollment model (monthly access)
 - [ ] Instructor revenue withdrawal tracking
@@ -464,3 +477,5 @@ stellar contract invoke \
 ## License
 
 MIT
+
+> **Note:** The events table above is the source of truth for off-chain indexers. When adding or changing an event in `contracts/hamplard/src/lib.rs`, update this table in the same PR.
