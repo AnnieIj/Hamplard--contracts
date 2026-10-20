@@ -233,8 +233,9 @@ Initialises the contract. Called once by the deployer.
 | `get_course(course_id)` | Full `Course` struct |
 | `get_enrollment(student, course_id)` | Full `Enrollment` struct |
 | `get_certificate(caller, certificate_id)` | Full `Certificate` struct (student, instructor, or admin only) |
-| `is_enrolled(student, course_id)` | `bool` |
-| `has_completed(student, course_id)` | `bool` |
+| `is_enrolled(student, course_id)` | `bool` — record exists (also true for completed/expired records) |
+| `get_enrollment_status(student, course_id)` | `EnrollmentStatus` — `None`, `Active`, `Expired`, `Completed`, or `Refunded` |
+| `has_completed(student, course_id)` | `Option<bool>` |
 | `verify_certificate(certificate_id)` | `bool` — true if exists and not revoked |
 | `get_platform_fee()` | `u32` — current default fee % |
 

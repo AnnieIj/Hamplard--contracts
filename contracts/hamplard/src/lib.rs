@@ -264,6 +264,22 @@ pub enum CourseStatus {
     Rejected,
 }
 
+/// Lifecycle state of a student's enrollment in a course.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum EnrollmentStatus {
+    /// No enrollment record exists for this student/course pair.
+    None,
+    /// Enrolled and currently within the enrollment window.
+    Active,
+    /// Enrolled, not completed, and past the course's enrollment expiry.
+    Expired,
+    /// Enrollment has been marked completed.
+    Completed,
+    /// Enrollment was refunded and archived to enrollment history.
+    Refunded,
+}
+
 /// A course listing stored on-chain
 /// Full content (videos, materials, descriptions) lives off-chain in the backend.
 /// The contract stores only what is needed to enforce payments and certificates.
@@ -511,8 +527,10 @@ pub enum DataKey {
     PlatformPaused,
     /// Accumulated instructor earnings per (instructor, token) pair (in stroops)
     InstructorEarnings(Address, Address),
-    /// Accumulated instructor earnings across all tokens (in stroops)
-    InstructorTotalEarnings(Address),
+    /// Lifetime net earnings per (instructor, token) pair (in stroops).
+    /// Withdrawals do not reduce this counter; refunds do. Keeping the key
+    /// token-scoped prevents mixing amounts denominated in different tokens.
+    InstructorLifetimeEarnings(Address, Address),
     /// Number of courses registered by an instructor
     InstructorCourseCount(Address),
     /// Number of currently pending courses for an instructor
@@ -551,9 +569,12 @@ pub enum DataKey {
     RiskFeeConfig,
     /// Flag indicating whether risk-based fee pricing is enabled
     RiskConfigEnabled,
-    /// Total active enrollments across all courses platform-wide
+    /// Total active paid enrollments across all courses platform-wide.
+    /// Free-course enrollments are excluded so they cannot consume paid
+    /// platform capacity.
     TotalActiveEnrollments,
-    /// Maximum total active enrollments allowed platform-wide
+    /// Maximum total active paid enrollments allowed platform-wide.
+    /// Free-course enrollments do not count against this cap.
     PlatformEnrollmentCap,
     /// A proposed contract Wasm upgrade awaiting its time-lock, if any.
     PendingUpgrade,
@@ -608,6 +629,10 @@ pub enum DataKey2 {
     HighValueCourseThreshold,
     /// Stores the first approver's address for a high-value course pending co-signature
     HighValueCourseApproval(String),
+    /// Bounded admin-supplied reason for freezing an instructor.
+    InstructorBlockReason(Address),
+    /// Bounded admin-supplied reason for blocking a student.
+    StudentBlockReason(Address),
 }
 
 /// A proposed contract code upgrade awaiting its governance time-lock.
@@ -640,6 +665,8 @@ impl HamplardContract {
     pub(crate) const PERSISTENT_TTL_EXTEND_TO: u32 = 6_300_000;
     const MAX_COURSE_ID_LEN: u32 = 256;
     const MAX_COURSE_TITLE_LEN: u32 = 512;
+    /// Maximum length, in bytes, of an admin-supplied moderation reason.
+    pub const MAX_MODERATION_REASON_LEN: u32 = 256;
     /// Minimum non-zero course price accepted at registration, denominated
     /// in stroops at the expected 7-decimal-place precision (0.01 USDC).
     /// Catches an instructor accidentally entering a price in whole-dollar
@@ -1689,15 +1716,17 @@ impl HamplardContract {
                             course.active_enrollments -= 1;
                         }
 
-                        let total_active: u32 = env
-                            .storage()
-                            .instance()
-                            .get(&DataKey::TotalActiveEnrollments)
-                            .unwrap_or(0);
-                        if total_active > 0 {
-                            env.storage()
+                        if enrollment.amount_paid > 0 {
+                            let total_active: u32 = env
+                                .storage()
                                 .instance()
-                                .set(&DataKey::TotalActiveEnrollments, &(total_active - 1));
+                                .get(&DataKey::TotalActiveEnrollments)
+                                .unwrap_or(0);
+                            if total_active > 0 {
+                                env.storage()
+                                    .instance()
+                                    .set(&DataKey::TotalActiveEnrollments, &(total_active - 1));
+                            }
                         }
 
                         Self::promote_from_waitlist(&env, &course_id);
@@ -2366,19 +2395,23 @@ impl HamplardContract {
             }
         }
 
-        // Check platform-wide enrollment cap
-        if let Some(platform_cap) = env
-            .storage()
-            .instance()
-            .get::<DataKey, u32>(&DataKey::PlatformEnrollmentCap)
-        {
-            let total_active: u32 = env
+        // Check the platform-wide cap for paid courses only. Free courses do
+        // not consume platform capacity and must remain enrollable even when
+        // the paid-enrollment cap is full.
+        if course.price > 0 {
+            if let Some(platform_cap) = env
                 .storage()
                 .instance()
-                .get(&DataKey::TotalActiveEnrollments)
-                .unwrap_or(0);
-            if total_active >= platform_cap {
-                panic!("platform has reached maximum total enrollment capacity");
+                .get::<DataKey, u32>(&DataKey::PlatformEnrollmentCap)
+            {
+                let total_active: u32 = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::TotalActiveEnrollments)
+                    .unwrap_or(0);
+                if total_active >= platform_cap {
+                    panic!("platform has reached maximum total enrollment capacity");
+                }
             }
         }
     }
@@ -2681,18 +2714,21 @@ impl HamplardContract {
             .persistent()
             .set(&DataKey::Course(course_id.clone()), &course);
 
-        // Increment platform-wide active enrollment counter
-        let total_active: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::TotalActiveEnrollments)
-            .unwrap_or(0);
-        env.storage().instance().set(
-            &DataKey::TotalActiveEnrollments,
-            &(total_active
-                .checked_add(1)
-                .unwrap_or_else(|| panic!("platform enrollment counter overflow"))),
-        );
+        // Increment the platform-wide paid-enrollment counter. Free courses
+        // are intentionally excluded so they cannot exhaust paid capacity.
+        if course.price > 0 {
+            let total_active: u32 = env
+                .storage()
+                .instance()
+                .get(&DataKey::TotalActiveEnrollments)
+                .unwrap_or(0);
+            env.storage().instance().set(
+                &DataKey::TotalActiveEnrollments,
+                &(total_active
+                    .checked_add(1)
+                    .unwrap_or_else(|| panic!("platform enrollment counter overflow"))),
+            );
+        }
 
         Self::update_instructor_stats(env, &course.instructor, |s| {
             s.total_students = s
@@ -2872,17 +2908,21 @@ impl HamplardContract {
             .persistent()
             .set(&DataKey::Course(course_id.clone()), &course);
 
-        let total_active: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::TotalActiveEnrollments)
-            .unwrap_or(0);
-        env.storage().instance().set(
-            &DataKey::TotalActiveEnrollments,
-            &(total_active
-                .checked_add(1)
-                .unwrap_or_else(|| panic!("platform enrollment counter overflow"))),
-        );
+        // Increment the platform-wide paid-enrollment counter. Free courses
+        // are intentionally excluded so they cannot exhaust paid capacity.
+        if course.price > 0 {
+            let total_active: u32 = env
+                .storage()
+                .instance()
+                .get(&DataKey::TotalActiveEnrollments)
+                .unwrap_or(0);
+            env.storage().instance().set(
+                &DataKey::TotalActiveEnrollments,
+                &(total_active
+                    .checked_add(1)
+                    .unwrap_or_else(|| panic!("platform enrollment counter overflow"))),
+            );
+        }
 
         Self::update_instructor_stats(env, &course.instructor, |s| {
             s.total_students = s
@@ -2948,13 +2988,13 @@ impl HamplardContract {
         if course.status != CourseStatus::Active {
             panic!("course is not available for enrollment");
         }
-        
+
         if let Some(start) = course.enrollment_start_ledger {
             if env.ledger().sequence() < start {
                 panic!("enrollment has not started for this course");
             }
         }
-            
+
         if !env
             .storage()
             .instance()
@@ -3037,7 +3077,12 @@ impl HamplardContract {
                 .unwrap_or_else(|| panic!("balance overflow during transfer verification"));
 
             if actual_received != course.price {
-                Self::emit_enrollment_failed(&env, &student, &course_id, "TRANSFER_AMOUNT_MISMATCH");
+                Self::emit_enrollment_failed(
+                    &env,
+                    &student,
+                    &course_id,
+                    "TRANSFER_AMOUNT_MISMATCH",
+                );
                 return;
             }
 
@@ -3115,18 +3160,21 @@ impl HamplardContract {
             .persistent()
             .set(&DataKey::Course(course_id.clone()), &course);
 
-        // Increment platform-wide active enrollment counter
-        let total_active: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::TotalActiveEnrollments)
-            .unwrap_or(0);
-        env.storage().instance().set(
-            &DataKey::TotalActiveEnrollments,
-            &(total_active
-                .checked_add(1)
-                .unwrap_or_else(|| panic!("platform enrollment counter overflow"))),
-        );
+        // Increment the platform-wide paid-enrollment counter. Free courses
+        // are intentionally excluded so they cannot exhaust paid capacity.
+        if course.price > 0 {
+            let total_active: u32 = env
+                .storage()
+                .instance()
+                .get(&DataKey::TotalActiveEnrollments)
+                .unwrap_or(0);
+            env.storage().instance().set(
+                &DataKey::TotalActiveEnrollments,
+                &(total_active
+                    .checked_add(1)
+                    .unwrap_or_else(|| panic!("platform enrollment counter overflow"))),
+            );
+        }
 
         Self::update_instructor_stats(&env, &course.instructor, |s| {
             s.total_students = s
@@ -3219,11 +3267,15 @@ impl HamplardContract {
             .unwrap_or(0)
     }
 
-    /// Get accumulated earnings for an instructor across all tokens
-    pub fn get_instructor_total_earnings(env: Env, instructor: Address) -> i128 {
+    /// Get lifetime net earnings for an instructor in a specific token.
+    ///
+    /// This counter is credited on enrollment and debited on refunds, and is
+    /// intentionally unaffected by withdrawals. It is token-scoped so values
+    /// denominated in different assets are never added together.
+    pub fn get_instructor_lifetime_earnings(env: Env, instructor: Address, token: Address) -> i128 {
         env.storage()
             .persistent()
-            .get(&DataKey::InstructorTotalEarnings(instructor))
+            .get(&DataKey::InstructorLifetimeEarnings(instructor, token))
             .unwrap_or(0)
     }
 
@@ -3298,14 +3350,8 @@ impl HamplardContract {
         }
 
         // Check enrollment expiry — expired enrollments cannot be completed
-        if let Some(expiry_ledgers) = course.enrollment_expiry_ledgers {
-            let expiry_at = enrollment
-                .enrolled_at_ledger
-                .checked_add(expiry_ledgers)
-                .unwrap_or(u32::MAX);
-            if env.ledger().sequence() >= expiry_at {
-                panic!("enrollment has expired");
-            }
+        if Self::is_enrollment_expired_internal(&env, &course, &enrollment) {
+            panic!("enrollment has expired");
         }
 
         enrollment.completed = true;
@@ -3339,15 +3385,17 @@ impl HamplardContract {
         }
 
         // Decrement platform-wide active enrollment counter
-        let total_active: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::TotalActiveEnrollments)
-            .unwrap_or(0);
-        if total_active > 0 {
-            env.storage()
+        if enrollment.amount_paid > 0 {
+            let total_active: u32 = env
+                .storage()
                 .instance()
-                .set(&DataKey::TotalActiveEnrollments, &(total_active - 1));
+                .get(&DataKey::TotalActiveEnrollments)
+                .unwrap_or(0);
+            if total_active > 0 {
+                env.storage()
+                    .instance()
+                    .set(&DataKey::TotalActiveEnrollments, &(total_active - 1));
+            }
         }
 
         Self::update_instructor_stats(&env, &course.instructor, |s| {
@@ -4215,15 +4263,25 @@ impl HamplardContract {
     /// Admin freezes/blocks a specific instructor address.
     /// Automatically pauses all of the instructor's currently Active courses
     /// to prevent students from enrolling in or paying for frozen instructor courses.
-    pub fn freeze_instructor(env: Env, admin: Address, instructor: Address) {
+    pub fn freeze_instructor(env: Env, admin: Address, instructor: Address, reason: String) {
         admin.require_auth();
         Self::require_admin(&env, &admin, "freeze_instructor");
+        Self::validate_moderation_reason(&reason);
         if Self::is_instructor_frozen_internal(&env, &instructor) {
             panic!("instructor already frozen");
         }
         env.storage()
             .instance()
             .set(&DataKey::InstructorBlocked(instructor.clone()), &true);
+        env.storage().persistent().set(
+            &DataKey2::InstructorBlockReason(instructor.clone()),
+            &reason,
+        );
+        env.storage().persistent().extend_ttl(
+            &DataKey2::InstructorBlockReason(instructor.clone()),
+            Self::PERSISTENT_TTL_THRESHOLD,
+            Self::PERSISTENT_TTL_EXTEND_TO,
+        );
 
         // Pause all of the instructor's currently Active courses
         if let Some(course_ids) = env
@@ -4261,7 +4319,7 @@ impl HamplardContract {
 
         env.events().publish(
             (Symbol::new(&env, "instructor_frozen"), instructor.clone()),
-            (instructor, admin),
+            (instructor, admin, reason),
         );
     }
 
@@ -4275,6 +4333,9 @@ impl HamplardContract {
         env.storage()
             .instance()
             .remove(&DataKey::InstructorBlocked(instructor.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey2::InstructorBlockReason(instructor.clone()));
         env.events().publish(
             (Symbol::new(&env, "instructor_unfrozen"), instructor.clone()),
             (instructor, admin),
@@ -4335,20 +4396,36 @@ impl HamplardContract {
         Self::is_instructor_frozen_internal(&env, &instructor)
     }
 
+    /// Get the admin-supplied reason for freezing an instructor, if frozen.
+    pub fn get_instructor_freeze_reason(env: Env, instructor: Address) -> Option<String> {
+        env.storage()
+            .persistent()
+            .get(&DataKey2::InstructorBlockReason(instructor))
+    }
+
     /// Admin blocks/bans a specific student address from the platform.
     /// Blocked students cannot enroll in any course.
-    pub fn block_student(env: Env, admin: Address, student: Address) {
+    pub fn block_student(env: Env, admin: Address, student: Address, reason: String) {
         admin.require_auth();
         Self::require_admin(&env, &admin, "block_student");
+        Self::validate_moderation_reason(&reason);
         if Self::is_student_blocked_internal(&env, &student) {
             panic!("student already blocked");
         }
         env.storage()
             .instance()
             .set(&DataKey::StudentBlocked(student.clone()), &true);
+        env.storage()
+            .persistent()
+            .set(&DataKey2::StudentBlockReason(student.clone()), &reason);
+        env.storage().persistent().extend_ttl(
+            &DataKey2::StudentBlockReason(student.clone()),
+            Self::PERSISTENT_TTL_THRESHOLD,
+            Self::PERSISTENT_TTL_EXTEND_TO,
+        );
         env.events().publish(
             (Symbol::new(&env, "student_blocked"), student.clone()),
-            (student, admin),
+            (student, admin, reason),
         );
     }
 
@@ -4362,6 +4439,9 @@ impl HamplardContract {
         env.storage()
             .instance()
             .remove(&DataKey::StudentBlocked(student.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey2::StudentBlockReason(student.clone()));
         env.events().publish(
             (Symbol::new(&env, "student_unblocked"), student.clone()),
             (student, admin),
@@ -4371,6 +4451,13 @@ impl HamplardContract {
     /// Check if a student is blocked/banned from the platform
     pub fn is_student_blocked(env: Env, student: Address) -> bool {
         Self::is_student_blocked_internal(&env, &student)
+    }
+
+    /// Get the admin-supplied reason for blocking a student, if blocked.
+    pub fn get_student_block_reason(env: Env, student: Address) -> Option<String> {
+        env.storage()
+            .persistent()
+            .get(&DataKey2::StudentBlockReason(student))
     }
 
     /// Get the current per-instructor course registration limit.
@@ -4411,8 +4498,9 @@ impl HamplardContract {
         env.storage().instance().get(&DataKey::AdminExpiresAt)
     }
 
-    /// Set the platform-wide maximum total active enrollment cap.
-    /// Pass `None` to remove the cap (unlimited enrollments).
+    /// Set the platform-wide maximum total active paid-enrollment cap.
+    /// Free-course enrollments are excluded from the counter and the cap.
+    /// Pass `None` to remove the cap (unlimited paid enrollments).
     pub fn set_platform_enrollment_cap(env: Env, admin: Address, cap: Option<u32>) {
         admin.require_auth();
         Self::require_admin(&env, &admin, "set_platform_enrollment_cap");
@@ -4436,14 +4524,15 @@ impl HamplardContract {
         );
     }
 
-    /// Get the platform-wide maximum total active enrollment cap, if set.
+    /// Get the platform-wide maximum total active paid-enrollment cap, if set.
     pub fn get_platform_enrollment_cap(env: Env) -> Option<u32> {
         env.storage()
             .instance()
             .get(&DataKey::PlatformEnrollmentCap)
     }
 
-    /// Get the current total active enrollments platform-wide.
+    /// Get the current total active paid enrollments platform-wide.
+    /// Free-course enrollments are excluded.
     pub fn get_total_active_enrollments(env: Env) -> u32 {
         env.storage()
             .instance()
@@ -4743,16 +4832,19 @@ impl HamplardContract {
                 .persistent()
                 .set(&DataKey::Course(course_id.clone()), &course);
 
-            // Decrement platform-wide active enrollment counter
-            let total_active: u32 = env
-                .storage()
-                .instance()
-                .get(&DataKey::TotalActiveEnrollments)
-                .unwrap_or(0);
-            if total_active > 0 {
-                env.storage()
+            // Decrement the platform-wide paid-enrollment counter. Free
+            // enrollments were never counted, so they must not decrement it.
+            if enrollment.amount_paid > 0 {
+                let total_active: u32 = env
+                    .storage()
                     .instance()
-                    .set(&DataKey::TotalActiveEnrollments, &(total_active - 1));
+                    .get(&DataKey::TotalActiveEnrollments)
+                    .unwrap_or(0);
+                if total_active > 0 {
+                    env.storage()
+                        .instance()
+                        .set(&DataKey::TotalActiveEnrollments, &(total_active - 1));
+                }
             }
 
             request.status = RefundStatus::Approved;
@@ -5122,11 +5214,64 @@ impl HamplardContract {
             .unwrap_or_else(|| Vec::new(&env))
     }
 
-    /// Check whether a student is enrolled in a course
+    /// Check whether a student has an active enrollment record for a course.
+    ///
+    /// This is a storage-presence check: it returns `true` for completed and
+    /// expired enrollments as long as their record still exists, and `false`
+    /// after a refund removes the record. Use `get_enrollment_status()` when
+    /// the lifecycle state matters.
     pub fn is_enrolled(env: Env, student: Address, course_id: String) -> bool {
         env.storage()
             .persistent()
             .has(&DataKey::Enrollment(student, course_id))
+    }
+
+    /// Return the lifecycle status of a student's enrollment in a course.
+    ///
+    /// Active and completed records take precedence over history. If no active
+    /// record exists, archived refunded records are checked so a refunded
+    /// enrollment is reported as `Refunded` rather than `None`.
+    pub fn get_enrollment_status(
+        env: Env,
+        student: Address,
+        course_id: String,
+    ) -> EnrollmentStatus {
+        if let Some(enrollment) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, Enrollment>(&DataKey::Enrollment(student.clone(), course_id.clone()))
+        {
+            if enrollment.is_refunded {
+                return EnrollmentStatus::Refunded;
+            }
+            if enrollment.completed {
+                return EnrollmentStatus::Completed;
+            }
+            if let Some(course) = Self::get_course_internal(&env, &course_id) {
+                if Self::is_enrollment_expired_internal(&env, &course, &enrollment) {
+                    return EnrollmentStatus::Expired;
+                }
+            }
+            return EnrollmentStatus::Active;
+        }
+
+        if let Some(history) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, Vec<Enrollment>>(&DataKey::EnrollmentHistory(student, course_id))
+        {
+            let mut i = history.len();
+            while i > 0 {
+                i -= 1;
+                if let Some(entry) = history.get(i) {
+                    if entry.is_refunded {
+                        return EnrollmentStatus::Refunded;
+                    }
+                }
+            }
+        }
+
+        EnrollmentStatus::None
     }
 
     /// Check whether a student has completed a course
@@ -5147,14 +5292,8 @@ impl HamplardContract {
             }
             // Not yet completed — check if the enrollment window has expired
             if let Some(course) = Self::get_course_internal(&env, &course_id) {
-                if let Some(expiry_ledgers) = course.enrollment_expiry_ledgers {
-                    let expiry_at = enrollment
-                        .enrolled_at_ledger
-                        .checked_add(expiry_ledgers)
-                        .unwrap_or(u32::MAX);
-                    if env.ledger().sequence() >= expiry_at {
-                        return Some(false); // Expired — treat as inactive
-                    }
+                if Self::is_enrollment_expired_internal(&env, &course, &enrollment) {
+                    return Some(false); // Expired — treat as inactive
                 }
             }
             Some(false)
@@ -5264,6 +5403,26 @@ impl HamplardContract {
             .persistent()
             .get(&DataKey::Enrollment(student.clone(), course_id.clone()))
             .unwrap_or_else(|| panic!("enrollment not found"))
+    }
+
+    fn is_enrollment_expired_internal(env: &Env, course: &Course, enrollment: &Enrollment) -> bool {
+        if let Some(expiry_ledgers) = course.enrollment_expiry_ledgers {
+            let expiry_at = enrollment
+                .enrolled_at_ledger
+                .checked_add(expiry_ledgers)
+                .unwrap_or(u32::MAX);
+            return env.ledger().sequence() >= expiry_at;
+        }
+        false
+    }
+
+    fn validate_moderation_reason(reason: &String) {
+        if reason.is_empty() {
+            panic!("moderation reason cannot be empty");
+        }
+        if reason.len() > Self::MAX_MODERATION_REASON_LEN {
+            panic!("moderation reason exceeds maximum length");
+        }
     }
 
     fn is_instructor_frozen_internal(env: &Env, instructor: &Address) -> bool {
@@ -5474,15 +5633,15 @@ impl HamplardContract {
             Self::PERSISTENT_TTL_THRESHOLD,
             Self::PERSISTENT_TTL_EXTEND_TO,
         );
-        // Also update the per-instructor total earnings accumulator
-        let total_key = DataKey::InstructorTotalEarnings(instructor.clone());
-        let current_total: i128 = env.storage().persistent().get(&total_key).unwrap_or(0);
-        let new_total = current_total
+        // Update the token-scoped lifetime net earnings accumulator.
+        let lifetime_key = DataKey::InstructorLifetimeEarnings(instructor.clone(), token.clone());
+        let current_lifetime: i128 = env.storage().persistent().get(&lifetime_key).unwrap_or(0);
+        let new_lifetime = current_lifetime
             .checked_add(amount)
-            .unwrap_or_else(|| panic!("overflow computing instructor total earnings"));
-        env.storage().persistent().set(&total_key, &new_total);
+            .unwrap_or_else(|| panic!("overflow computing instructor lifetime earnings"));
+        env.storage().persistent().set(&lifetime_key, &new_lifetime);
         env.storage().persistent().extend_ttl(
-            &total_key,
+            &lifetime_key,
             Self::PERSISTENT_TTL_THRESHOLD,
             Self::PERSISTENT_TTL_EXTEND_TO,
         );
@@ -5500,17 +5659,16 @@ impl HamplardContract {
         } else {
             env.storage().persistent().set(&key, &new_balance);
         }
-        // Also decrement the per-instructor total earnings accumulator
-        let total_key = DataKey::InstructorTotalEarnings(instructor.clone());
-        let current_total: i128 = env.storage().persistent().get(&total_key).unwrap_or(0);
-        if amount > current_total {
-            panic!("inconsistent instructor total earnings state");
-        }
-        let new_total = current_total - amount;
-        if new_total == 0 {
-            env.storage().persistent().remove(&total_key);
+        // Decrement the token-scoped lifetime net earnings accumulator. Use a
+        // saturating subtraction so refunds for enrollments created before this
+        // key existed cannot be blocked by an unmigrated (zero) counter.
+        let lifetime_key = DataKey::InstructorLifetimeEarnings(instructor.clone(), token.clone());
+        let current_lifetime: i128 = env.storage().persistent().get(&lifetime_key).unwrap_or(0);
+        let new_lifetime = current_lifetime.saturating_sub(amount);
+        if new_lifetime == 0 {
+            env.storage().persistent().remove(&lifetime_key);
         } else {
-            env.storage().persistent().set(&total_key, &new_total);
+            env.storage().persistent().set(&lifetime_key, &new_lifetime);
         }
     }
 
