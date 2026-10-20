@@ -1,3 +1,4 @@
+#![allow(clippy::too_many_arguments)]
 //! # Hamplard Contract — Security Model
 //!
 //! ## Trust Hierarchy
@@ -913,7 +914,7 @@ impl HamplardContract {
         for byte in id_bytes.iter() {
             // Allow printable ASCII: space (0x20) through tilde (0x7E)
             // Exclude null (0x00) and other control chars (0x01-0x1F, 0x7F)
-            if *byte < 0x20 || *byte > 0x7E {
+            if !(0x20..=0x7E).contains(byte) {
                 panic!("course_id contains invalid characters (must be printable ASCII)");
             }
         }
@@ -1005,7 +1006,7 @@ impl HamplardContract {
             // Snapshot of the live token rate, rounded up to whole percent.
             // Informational only — with no override, enrollment always
             // follows the live FeeConfig(token) / DefaultFee.
-            (token_fee_bps + 99) / 100
+            token_fee_bps.div_ceil(100)
         } else {
             if platform_fee_pct > 100 {
                 panic!("fee percentage cannot exceed 100");
@@ -6167,7 +6168,7 @@ impl HamplardContract {
             }
         }
 
-        if new_waitlist.len() > 0 {
+        if !new_waitlist.is_empty() {
             env.storage().persistent().set(&waitlist_key, &new_waitlist);
             env.storage().persistent().extend_ttl(
                 &waitlist_key,
@@ -6203,7 +6204,7 @@ impl HamplardContract {
         let waitlist: Option<Vec<Address>> = env.storage().persistent().get(&waitlist_key);
 
         if let Some(mut list) = waitlist {
-            if list.len() > 0 {
+            if !list.is_empty() {
                 let next_student = list.get(0).unwrap();
 
                 // Remove from waitlist
@@ -6212,7 +6213,7 @@ impl HamplardContract {
                     new_waitlist.push_back(list.get(i).unwrap());
                 }
 
-                if new_waitlist.len() > 0 {
+                if !new_waitlist.is_empty() {
                     env.storage().persistent().set(&waitlist_key, &new_waitlist);
                     env.storage().persistent().extend_ttl(
                         &waitlist_key,
