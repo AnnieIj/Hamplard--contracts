@@ -71,10 +71,10 @@ Instructors register courses on-chain with a price and fee structure. Each cours
 
 **2. Enrollment Payments**
 When a student enrolls, the contract automatically splits the payment in a single transaction:
-- Platform fee → treasury address
-- Instructor share → instructor address directly
+- Platform fee → treasury address (transferred immediately)
+- Instructor share → held in the contract, withdrawable by the instructor via `withdraw_earnings()`
 
-No escrow needed — the payment splits and lands in both wallets immediately. The contract records the enrollment so no student can enroll twice.
+The payment is split atomically. The contract records the enrollment so no student can enroll twice.
 
 **3. On-Chain Certificates**
 After a student completes a course (verified off-chain by the backend), the admin issues an on-chain certificate. Each certificate is a permanent, verifiable record tied to the student's Stellar address and the course. Anyone can verify a certificate by querying `verify_certificate(certificate_id)` — no trusted middleman needed. Certificates can be revoked by the admin if issued in error.
@@ -122,8 +122,10 @@ This keeps the contract small, cheap to call, and focused on what blockchains ar
 
 | Role | Address | Permissions |
 |------|---------|-------------|
-| **Admin** | Set at `init` | Approve/archive courses, mark completions, issue/revoke certificates, update fee |
-| **Instructor** | Set per course | Register courses, pause/unpause their own courses |
+| **Admin** | Set at `init` | Approve/reject/archive courses, mark completions, issue/revoke certificates, block students, update fee |
+| **Secondary Admin** | Set at `init` | Required alongside Admin for multi-sig operations (archive, treasury update, admin transfer, upgrade) |
+| **Approver** | Added by Admin | Approve and reject courses; no access to treasury, fee, or admin-transfer functions |
+| **Instructor** | Set per course | Register courses, pause/unpause their own courses, withdraw earnings |
 | **Student** | Any address | Enroll in active courses |
 | **Treasury** | Set at `init` | Receives platform fee share (passive recipient only) |
 
@@ -142,7 +144,7 @@ pub struct Course {
     pub token: Address,                // USDC Stellar Asset Contract
     pub total_enrollments: u32,
     pub total_earned: i128,
-    pub status: CourseStatus,          // Pending | Active | Paused | Archived
+    pub status: CourseStatus,          // Pending | Active | Paused | Archived | Rejected
     pub created_at_ledger: u32,
 }
 ```
@@ -177,28 +179,34 @@ pub struct Certificate {
 ### `CourseStatus` state machine
 
 ```
-Pending ── approve_course() ──→ Active
-Active  ── pause_course()   ──→ Paused
-Paused  ── unpause_course() ──→ Active
-Active  ── archive_course() ──→ Archived (admin only, permanent)
+Pending ── approve_course()  ──→ Active
+Pending ── reject_course()   ──→ Rejected
+Active  ── pause_course()    ──→ Paused
+Paused  ── unpause_course()  ──→ Active
+Paused  ── archive_course()  ──→ Archived  (both admins, permanent)
+Pending ── archive_course()  ──→ Archived  (both admins; no enrollments to refund)
+Rejected── archive_course()  ──→ Archived  (both admins)
 ```
+
+Archiving requires the course to be in `Paused`, `Pending`, or `Rejected` status — an `Active` course cannot be archived directly. The operation also requires both admin addresses (multi-sig). `Archived` is a terminal state; no further transitions are possible.
 
 ---
 
 ## Contract Functions
 
-### `init(admin, treasury, default_fee_pct)`
-Initialises the contract. Called once by the deployer.
+### `init(admin, secondary_admin, treasury, default_fee_pct, max_courses_per_instructor, refund_window_ledgers, revocation_challenge_period)`
+Initialises the contract. Called once by the deployer. Requires the primary admin to sign.
 
 ### Course management
 
 | Function | Caller | Description |
 |---|---|---|
 | `register_course(instructor, course_id, price, token, platform_fee_pct)` | Instructor | Register a course — starts as Pending |
-| `approve_course(admin, course_id)` | Admin | Move Pending → Active |
+| `approve_course(caller, course_id)` | Admin or Approver | Move Pending → Active |
+| `reject_course(caller, course_id, reason)` | Admin or Approver | Move Pending → Rejected |
 | `pause_course(caller, course_id)` | Admin or Instructor | Move Active → Paused |
 | `unpause_course(caller, course_id)` | Admin or Instructor | Move Paused → Active |
-| `archive_course(admin, course_id)` | Admin only | Permanently archive |
+| `archive_course(admin1, admin2, course_id, students_to_refund)` | Both admins (multi-sig) | Permanently archive a Paused, Pending, or Rejected course |
 
 ### Enrollment
 
@@ -212,18 +220,17 @@ Initialises the contract. Called once by the deployer.
 |---|---|---|
 | `mark_completed(admin, student, course_id, evidence_hash)` | Admin | Called after backend verifies all lessons done. A non-empty `evidence_hash` replaces the student co-signature. |
 | `issue_certificate(admin, student, course_id, cert_id, course_title, enrollment_reference, expires_at_ledger, instructor_signature)` | Admin | Issues on-chain certificate. Requires completion. `enrollment_reference` is a free-form backend ID (e.g. UUID). |
-| `revoke_certificate(admin, cert_id)` | Admin | Flags certificate as revoked |
-| `mark_completed(admin, student, course_id)` | Admin | Called after backend verifies all lessons done |
-| `issue_certificate(admin, cert_id, student, course_id, course_title)` | Admin | Issues on-chain certificate. Requires completion. |
-| `revoke_certificate(admin, cert_id, reason)` | Admin | Flags certificate as revoked |
+| `revoke_certificate(admin, cert_id, reason)` | Admin | Flags certificate as revoked (enters challenge period before becoming permanent) |
 | `bulk_revoke_course_certificates(admin, course_id)` | Admin | Flags every certificate of a course as revoked in one transaction |
+| `challenge_revocation(student, certificate_id)` | Student | Disputes a pending revocation before the challenge period expires |
 
 ### Admin management
 
 | Function | Caller | Description |
 |---|---|---|
-| `transfer_admin(current_admin, new_admin)` | Admin | Transfer admin role |
-| `update_treasury(admin, new_treasury)` | Admin | Update treasury address |
+| `transfer_admin(admin1, admin2, new_admin, new_secondary_admin)` | Both admins (multi-sig) | Propose a new admin pair (new admins call `accept_admin` to complete) |
+| `accept_admin(new_admin, new_secondary_admin)` | Pending admins | Accept a proposed admin transfer |
+| `update_treasury(admin1, admin2, new_treasury)` | Both admins (multi-sig) | Schedule a treasury address update (takes effect after 100 ledgers) |
 | `update_default_fee(admin, new_fee_pct)` | Admin | Update default platform fee |
 
 ### Read-only queries
@@ -231,12 +238,12 @@ Initialises the contract. Called once by the deployer.
 | Function | Returns |
 |---|---|---|
 | `get_course(course_id)` | Full `Course` struct |
-| `get_enrollment(student, course_id)` | Full `Enrollment` struct |
+| `get_enrollment(caller, student, course_id)` | Full `Enrollment` struct |
 | `get_certificate(caller, certificate_id)` | Full `Certificate` struct (student, instructor, or admin only) |
 | `is_enrolled(student, course_id)` | `bool` |
-| `has_completed(student, course_id)` | `bool` |
-| `verify_certificate(certificate_id)` | `bool` — true if exists and not revoked |
-| `get_platform_fee()` | `u32` — current default fee % |
+| `has_completed(student, course_id)` | `Option<bool>` — `None` if no enrollment, `Some(true/false)` if enrolled |
+| `verify_certificate(certificate_id)` | `bool` — true if exists, not revoked, and not expired |
+| `get_platform_fee(admin)` | `u32` — current default fee % (admin only) |
 
 ---
 
@@ -282,6 +289,7 @@ Returns `true` if the certificate exists and has not been revoked. The `get_cert
 |---|---|---|
 | `course_registered` | `course_id` | Instructor registers a course |
 | `course_approved` | `course_id` | Admin approves a course |
+| `course_rejected` | `(course_id, instructor, caller, reason, ledger)` | Admin or approver rejects a course |
 | `course_paused` | `course_id` | Course paused |
 | `course_unpaused` | `course_id` | Course unpaused |
 | `course_archived` | `course_id` | Course archived |
