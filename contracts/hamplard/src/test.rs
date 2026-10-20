@@ -114,6 +114,50 @@ fn get_enrollment_ref(
     enrollment.enrollment_ref
 }
 
+fn next_solvency_random(seed: &mut u64) -> u64 {
+    *seed = (*seed)
+        .wrapping_mul(6_364_136_223_846_793_005)
+        .wrapping_add(1);
+    *seed
+}
+
+fn assert_token_solvency(
+    env: &Env,
+    client: &HamplardContractClient,
+    contract_id: &Address,
+    token_id: &Address,
+    instructors: &[Address],
+    students: &[Address],
+    course_ids: &[String],
+    operation: &str,
+) {
+    let mut liabilities = 0i128;
+    for instructor in instructors {
+        liabilities = liabilities
+            .checked_add(client.get_instructor_earnings(instructor, token_id))
+            .expect("instructor liability sum overflow");
+    }
+
+    for student in students {
+        for course_id in course_ids {
+            if let Some(case) = client.get_arbitration_case(student, course_id) {
+                if case.status == DisputeStatus::Open {
+                    assert_eq!(case.token, *token_id);
+                    liabilities = liabilities
+                        .checked_add(case.fee_paid)
+                        .expect("arbitration liability sum overflow");
+                }
+            }
+        }
+    }
+
+    let contract_balance = token::Client::new(env, token_id).balance(contract_id);
+    assert!(
+        contract_balance >= liabilities,
+        "token insolvency after {operation}: contract balance {contract_balance}, liabilities {liabilities}"
+    );
+}
+
 // ============================================================
 // INIT TESTS
 // ============================================================
@@ -11419,4 +11463,239 @@ fn test_re_enroll_succeeds_at_enrollment_start_ledger() {
         .unwrap();
     assert!(!enrollment.completed);
     assert_eq!(enrollment.enrolled_at_ledger, enrollment_start);
+}
+
+#[test]
+fn test_randomized_token_solvency_after_financial_operations() {
+    const STUDENT_COUNT: usize = 12;
+    const COURSE_IDS: [&str; 3] = [
+        "COURSE-SOLVENCY-0",
+        "COURSE-SOLVENCY-1",
+        "COURSE-SOLVENCY-2",
+    ];
+    const COURSE_PRICE: i128 = 500_000_000;
+    const ARBITRATION_FEE: i128 = 5_000_000;
+
+    let (env, contract_id, token_id, admin, sec_admin, _treasury, first_instructor) = setup();
+    // Refunds move the platform share out of the treasury contract, which is
+    // a nested (non-root) authorization — allow it like the other refund tests do.
+    env.mock_all_auths_allowing_non_root_auth();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let asset_client = token::StellarAssetClient::new(&env, &token_id);
+
+    let mut instructors = std::vec::Vec::new();
+    instructors.push(first_instructor);
+    for _ in 1..COURSE_IDS.len() {
+        instructors.push(Address::generate(&env));
+    }
+
+    let mut course_ids = std::vec::Vec::new();
+    for course_name in COURSE_IDS {
+        course_ids.push(String::from_str(&env, course_name));
+    }
+
+    let mut students = std::vec::Vec::new();
+    for _ in 0..STUDENT_COUNT {
+        let student = Address::generate(&env);
+        asset_client.mint(&student, &10_000_000_000);
+        students.push(student);
+    }
+
+    let assert_solvency = |operation: &str| {
+        assert_token_solvency(
+            &env,
+            &client,
+            &contract_id,
+            &token_id,
+            &instructors,
+            &students,
+            &course_ids,
+            operation,
+        );
+    };
+
+    client.set_arbitration_fee_config(&admin, &ARBITRATION_FEE);
+    for i in 0..instructors.len() {
+        register_and_approve_course(
+            &env,
+            &client,
+            &token_id,
+            &admin,
+            &instructors[i],
+            COURSE_IDS[i],
+            COURSE_PRICE,
+        );
+    }
+
+    // Direct transfers create recoverable surplus for the emergency sweep path.
+    asset_client.mint(&contract_id, &100_000_000);
+    assert_solvency("initial funding");
+
+    let mut enrolled = [[false; COURSE_IDS.len()]; STUDENT_COUNT];
+    let mut refunded = [[false; COURSE_IDS.len()]; STUDENT_COUNT];
+    let mut open_arbitration = [[false; COURSE_IDS.len()]; STUDENT_COUNT];
+
+    for course_index in 0..COURSE_IDS.len() {
+        client.enroll(&students[0], &course_ids[course_index]);
+        enrolled[0][course_index] = true;
+        assert_solvency("initial enrollment");
+    }
+
+    client.escalate_to_arbitration(&students[0], &course_ids[0]);
+    open_arbitration[0][0] = true;
+    assert_solvency("arbitration escalation");
+
+    client.request_refund(&students[0], &course_ids[1]);
+    assert_solvency("refund request");
+    client.process_refund(&admin, &students[0], &course_ids[1], &true, &None);
+    refunded[0][1] = true;
+    assert_solvency("approved refund");
+
+    client.withdraw_earnings(&instructors[0], &token_id, &1_000_000, &None);
+    assert_solvency("instructor withdrawal");
+
+    client.withdraw_tokens(
+        &admin,
+        &sec_admin,
+        &token_id,
+        &10_000_000,
+        &Address::generate(&env),
+    );
+    assert_solvency("emergency token withdrawal");
+
+    client.resolve_arbitration(&admin, &students[0], &course_ids[0], &true);
+    open_arbitration[0][0] = false;
+    assert_solvency("arbitration resolution");
+
+    let mut seed = 0x505_2026_u64;
+    for step in 0..120 {
+        let operation = next_solvency_random(&mut seed) % 5;
+        match operation {
+            0 => {
+                let start =
+                    next_solvency_random(&mut seed) as usize % (STUDENT_COUNT * COURSE_IDS.len());
+                for offset in 0..(STUDENT_COUNT * COURSE_IDS.len()) {
+                    let index = (start + offset) % (STUDENT_COUNT * COURSE_IDS.len());
+                    let student_index = index / COURSE_IDS.len();
+                    let course_index = index % COURSE_IDS.len();
+                    if !enrolled[student_index][course_index] {
+                        client.enroll(&students[student_index], &course_ids[course_index]);
+                        enrolled[student_index][course_index] = true;
+                        break;
+                    }
+                }
+            }
+            1 => {
+                let start =
+                    next_solvency_random(&mut seed) as usize % (STUDENT_COUNT * COURSE_IDS.len());
+                for offset in 0..(STUDENT_COUNT * COURSE_IDS.len()) {
+                    let index = (start + offset) % (STUDENT_COUNT * COURSE_IDS.len());
+                    let student_index = index / COURSE_IDS.len();
+                    let course_index = index % COURSE_IDS.len();
+                    if enrolled[student_index][course_index]
+                        && !refunded[student_index][course_index]
+                    {
+                        let enrollment = client
+                            .get_enrollment(
+                                &students[student_index],
+                                &students[student_index],
+                                &course_ids[course_index],
+                            )
+                            .expect("tracked active enrollment must exist");
+                        let earnings =
+                            client.get_instructor_earnings(&instructors[course_index], &token_id);
+                        if earnings >= enrollment.instructor_amount {
+                            client.request_refund(
+                                &students[student_index],
+                                &course_ids[course_index],
+                            );
+                            assert_solvency("random refund request");
+                            client.process_refund(
+                                &admin,
+                                &students[student_index],
+                                &course_ids[course_index],
+                                &true,
+                                &None,
+                            );
+                            refunded[student_index][course_index] = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            2 => {
+                let instructor_index = next_solvency_random(&mut seed) as usize % instructors.len();
+                let earnings =
+                    client.get_instructor_earnings(&instructors[instructor_index], &token_id);
+                if earnings > 0 {
+                    let amount = 1 + (next_solvency_random(&mut seed) as i128 % earnings);
+                    client.withdraw_earnings(
+                        &instructors[instructor_index],
+                        &token_id,
+                        &amount,
+                        &None,
+                    );
+                }
+            }
+            3 => {
+                let has_open_case = open_arbitration.iter().flatten().any(|is_open| *is_open);
+                let resolve_case = has_open_case && next_solvency_random(&mut seed) % 2 == 0;
+                let start =
+                    next_solvency_random(&mut seed) as usize % (STUDENT_COUNT * COURSE_IDS.len());
+                for offset in 0..(STUDENT_COUNT * COURSE_IDS.len()) {
+                    let index = (start + offset) % (STUDENT_COUNT * COURSE_IDS.len());
+                    let student_index = index / COURSE_IDS.len();
+                    let course_index = index % COURSE_IDS.len();
+                    if resolve_case && open_arbitration[student_index][course_index] {
+                        let for_student = next_solvency_random(&mut seed) % 2 == 0;
+                        client.resolve_arbitration(
+                            &admin,
+                            &students[student_index],
+                            &course_ids[course_index],
+                            &for_student,
+                        );
+                        open_arbitration[student_index][course_index] = false;
+                        break;
+                    } else if !resolve_case
+                        && enrolled[student_index][course_index]
+                        && !open_arbitration[student_index][course_index]
+                    {
+                        client.escalate_to_arbitration(
+                            &students[student_index],
+                            &course_ids[course_index],
+                        );
+                        open_arbitration[student_index][course_index] = true;
+                        break;
+                    }
+                }
+            }
+            _ => {
+                let mut liabilities = 0i128;
+                for instructor in &instructors {
+                    liabilities += client.get_instructor_earnings(instructor, &token_id);
+                }
+                for student_index in 0..STUDENT_COUNT {
+                    for course_index in 0..COURSE_IDS.len() {
+                        if open_arbitration[student_index][course_index] {
+                            liabilities += ARBITRATION_FEE;
+                        }
+                    }
+                }
+                let contract_balance = token::Client::new(&env, &token_id).balance(&contract_id);
+                let surplus = contract_balance - liabilities;
+                if surplus > 0 {
+                    let amount = 1 + (next_solvency_random(&mut seed) as i128 % surplus);
+                    client.withdraw_tokens(
+                        &admin,
+                        &sec_admin,
+                        &token_id,
+                        &amount,
+                        &Address::generate(&env),
+                    );
+                }
+            }
+        }
+
+        assert_solvency(&format!("random operation {step}"));
+    }
 }
