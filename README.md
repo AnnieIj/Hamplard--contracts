@@ -178,65 +178,158 @@ pub struct Certificate {
 
 ```
 Pending ── approve_course() ──→ Active
+Pending ── reject_course()  ──→ Rejected
 Active  ── pause_course()   ──→ Paused
 Paused  ── unpause_course() ──→ Active
-Active  ── archive_course() ──→ Archived (admin only, permanent)
+Active/Paused/Pending/Rejected ── archive_course() ──→ Archived (both admins, permanent)
 ```
 
 ---
 
 ## Contract Functions
 
-### `init(admin, treasury, default_fee_pct)`
-Initialises the contract. Called once by the deployer.
+### Initialization
+
+| Function | Signer | Description |
+|---|---|---|
+| `init(admin, secondary_admin, treasury, default_fee_pct, max_courses_per_instructor, refund_window_ledgers, revocation_challenge_period)` | `admin` | One-time setup of the admin pair, treasury, fee default, and platform limits. |
 
 ### Course management
 
-| Function | Caller | Description |
+| Function | Signer | Description |
 |---|---|---|
-| `register_course(instructor, course_id, price, token, platform_fee_pct)` | Instructor | Register a course — starts as Pending |
-| `approve_course(admin, course_id)` | Admin | Move Pending → Active |
-| `pause_course(caller, course_id)` | Admin or Instructor | Move Active → Paused |
-| `unpause_course(caller, course_id)` | Admin or Instructor | Move Paused → Active |
-| `archive_course(admin, course_id)` | Admin only | Permanently archive |
+| `register_course(instructor, course_id, price, token, platform_fee_pct, max_capacity, content_hash, categories)` | Instructor | Register a course; starts as `Pending`. |
+| `approve_course(admin, course_id)` | Admin | Move `Pending` → `Active`. |
+| `reject_course(admin, course_id, reason)` | Admin | Reject a pending course. |
+| `pause_course(caller, course_id)` | Admin or course instructor | Move `Active` → `Paused`. |
+| `unpause_course(caller, course_id)` | Admin or course instructor | Move `Paused` → `Active`. |
+| `transfer_course(instructor, admin, course_id, new_instructor)` | Instructor + Admin | Transfer course ownership. |
+| `archive_course(admin1, admin2, course_id, students_to_refund)` | Admin + Secondary admin | Permanently archive and optionally refund listed students. |
+| `update_course(caller, course_id, new_price, new_max_capacity)` | Admin or course instructor | Update price/capacity and bump the course version. |
+| `clear_course_max_capacity(caller, course_id)` | Admin or course instructor | Remove the capacity cap. |
+| `set_enrollment_start_ledger(caller, course_id, enrollment_start_ledger)` | Admin or course instructor | Set/clear the enrollment opening ledger. |
+| `set_enrollment_expiry(caller, course_id, expiry_ledgers)` | Admin or course instructor | Set/clear per-enrollment expiry. |
+| `set_course_expiry(caller, course_id, expires_at_ledger)` | Admin or course instructor | Set/clear the course listing expiry. |
+| `set_prerequisite_courses(caller, course_id, prerequisite_course_ids)` | Admin or course instructor | Set prerequisite course IDs. |
+| `update_content_hash(caller, course_id, content_hash)` | Admin or course instructor | Update the off-chain content commitment. |
+| `set_max_certificates(caller, course_id, max_certs)` | Admin or course instructor | Set/clear the certificate cap. |
 
-### Enrollment
+`CoInstructor` revenue shares are represented in the data model, but no
+on-chain mutation API for co-instructors is currently exposed.
 
-| Function | Caller | Description |
+### Enrollment, refunds, and earnings
+
+| Function | Signer | Description |
 |---|---|---|
-| `enroll(student, course_id)` | Student | Pay and enroll. Splits payment instantly. |
+| `enroll(student, course_id)` | Student | Pay the course price, split the payment, and create an enrollment. |
+| `batch_enroll(student, course_ids)` | Student | Enroll in multiple courses atomically; returns the total paid. |
+| `re_enroll(student, course_id)` | Student | Re-enroll after a completed enrollment, archiving the prior attempt. |
+| `request_refund(student, course_id)` | Student | Open a refund request within the configured window. |
+| `process_refund(admin, student, course_id, approved, refund_amount)` | Admin | Approve or reject a pending refund; `None` refunds the full amount. |
+| `withdraw_earnings(instructor, token, amount, destination)` | Instructor | Withdraw accrued instructor earnings; `amount = 0` withdraws all. |
 
-### Completion & Certificates
+### Completion and certificates
 
-| Function | Caller | Description |
+| Function | Signer | Description |
 |---|---|---|
-| `mark_completed(admin, student, course_id, evidence_hash)` | Admin | Called after backend verifies all lessons done. A non-empty `evidence_hash` replaces the student co-signature. |
-| `issue_certificate(admin, student, course_id, cert_id, course_title, enrollment_reference, expires_at_ledger, instructor_signature)` | Admin | Issues on-chain certificate. Requires completion. `enrollment_reference` is a free-form backend ID (e.g. UUID). |
-| `revoke_certificate(admin, cert_id)` | Admin | Flags certificate as revoked |
-| `mark_completed(admin, student, course_id)` | Admin | Called after backend verifies all lessons done |
-| `issue_certificate(admin, cert_id, student, course_id, course_title)` | Admin | Issues on-chain certificate. Requires completion. |
-| `revoke_certificate(admin, cert_id, reason)` | Admin | Flags certificate as revoked |
-| `bulk_revoke_course_certificates(admin, course_id)` | Admin | Flags every certificate of a course as revoked in one transaction |
+| `mark_completed(admin, student, course_id, evidence_hash)` | Admin | Mark an enrollment complete; `evidence_hash` is `Option<BytesN<32>>`. |
+| `issue_certificate(admin, student, course_id, certificate_id, course_title, enrollment_reference, expires_at_ledger, instructor_signature)` | Admin | Issue an on-chain certificate for a completed enrollment. |
+| `revoke_certificate(admin, certificate_id, reason)` | Admin | Start revocation; the challenge period must elapse before it is permanent. |
+| `challenge_revocation(student, certificate_id)` | Certificate student | Challenge a pending revocation during the challenge period. |
+| `bulk_revoke_course_certificates(admin, course_id)` | Admin | Revoke every certificate for a course in one transaction. |
 
-### Admin management
+### Platform administration
 
-| Function | Caller | Description |
+| Function | Signer | Description |
 |---|---|---|
-| `transfer_admin(current_admin, new_admin)` | Admin | Transfer admin role |
-| `update_treasury(admin, new_treasury)` | Admin | Update treasury address |
-| `update_default_fee(admin, new_fee_pct)` | Admin | Update default platform fee |
+| `pause_platform(admin)` / `unpause_platform(admin)` | Admin | Halt or restore all enrollments. |
+| `withdraw_tokens(admin1, admin2, token, amount, destination)` | Admin + Secondary admin | Emergency sweep of contract-held tokens. |
+| `transfer_admin(admin1, admin2, new_admin, new_secondary_admin)` | Admin + Secondary admin | Propose a new admin pair. |
+| `accept_admin(new_admin, new_secondary_admin)` | Proposed admins | Accept the pending admin transfer. |
+| `update_treasury(admin1, admin2, new_treasury)` | Admin + Secondary admin | Schedule a treasury update. |
+| `set_admin_expiry(admin1, admin2, expires_at)` | Admin + Secondary admin | Set/clear the admin role expiry. |
+| `update_default_fee(admin, new_fee_pct)` | Admin | Update the default platform fee percentage. |
+| `add_approved_token(admin, token)` / `remove_approved_token(admin, token)` | Admin | Manage the accepted token list. |
+| `set_token_btc_eth(admin, token, is_btc_eth)` | Admin | Mark a token for BTC/ETH risk surcharges. |
+| `update_max_courses_limit(admin, new_max)` | Admin | Update the per-instructor course limit. |
+| `freeze_instructor(admin, instructor)` / `unfreeze_instructor(admin, instructor)` | Admin | Freeze/unfreeze an instructor. |
+| `block_student(admin, student)` / `unblock_student(admin, student)` | Admin | Block/unblock a student platform-wide. |
+| `add_approver(admin, approver)` / `remove_approver(admin, approver)` | Admin | Manage approver addresses. |
+| `set_platform_enrollment_cap(admin, cap)` | Admin | Set/clear the platform-wide active enrollment cap. |
+| `update_min_review_delay(admin, delay)` | Admin | Set the minimum review delay. |
+| `update_min_completion_ledgers(admin, ledgers)` | Admin | Set the default minimum completion delay (max 1,000,000 ledgers). |
+| `update_refund_window(admin, window)` | Admin | Set the refund request window. |
+| `set_revocation_challenge_period(admin, period)` | Admin | Set the certificate revocation challenge period. |
+| `set_high_value_course_threshold(admin, threshold)` | Admin | Set the high-value course threshold. |
+
+### Fees, risk, and arbitration
+
+| Function | Signer | Description |
+|---|---|---|
+| `set_fee_config(admin, token, fee_bps)` | Admin | Set the per-token platform fee in basis points. |
+| `set_arbitration_fee_config(admin, fee_per_case)` | Admin | Set the arbitration fee. |
+| `set_risk_config_enabled(admin, enabled)` | Admin | Enable/disable risk-based surcharges. |
+| `set_risk_fee_config(admin, large_payment_surcharge_bps, large_payment_threshold, new_customer_surcharge_bps, btc_eth_surcharge_bps)` | Admin | Configure risk surcharge parameters. |
+| `escalate_to_arbitration(caller, course_id)` | Caller | Pay the arbitration fee and open a dispute. |
+| `resolve_arbitration(admin, caller, course_id, for_student)` | Admin | Resolve an open case and disburse the held fee. |
+| `calculate_risk_score(student, token, payment_amount)` | None | Preview the risk score and surcharge. |
+| `get_effective_fee_for_payment(student, token, payment_amount)` | None | Preview the effective fee breakdown. |
+| `do_complete_payment(student, token, payment_amount)` | None | Return the same fee breakdown used by enrollment. |
+
+### Waitlist and upgrades
+
+| Function | Signer | Description |
+|---|---|---|
+| `join_waitlist(student, course_id)` / `leave_waitlist(student, course_id)` | Student | Join or leave a course waitlist. |
+| `propose_upgrade(admin1, admin2, new_wasm_hash)` | Admin + Secondary admin | Start the upgrade timelock. |
+| `cancel_upgrade(admin1, admin2)` | Admin + Secondary admin | Cancel a pending upgrade. |
+| `upgrade_contract(admin1, admin2)` | Admin + Secondary admin | Execute an approved upgrade after the timelock. |
+| `set_upgrade_timelock(admin1, admin2, ledgers)` | Admin + Secondary admin | Set the upgrade review window. |
 
 ### Read-only queries
 
 | Function | Returns |
-|---|---|---|
-| `get_course(course_id)` | Full `Course` struct |
-| `get_enrollment(student, course_id)` | Full `Enrollment` struct |
-| `get_certificate(caller, certificate_id)` | Full `Certificate` struct (student, instructor, or admin only) |
+|---|---|
+| `get_course(course_id)` | `Course` |
+| `get_enrollment(caller, student, course_id)` | `Option<Enrollment>`; caller must be the student, course instructor, or admin |
+| `get_enrollment_history(caller, student, course_id)` | `Vec<Enrollment>` with the same access rules |
+| `get_certificate(caller, certificate_id)` | `Certificate`; caller must be the student, instructor, or admin |
+| `get_course_certificates(course_id)` | `Vec<String>` of certificate IDs |
+| `get_refund_request(student, course_id)` | `Option<RefundRequest>` |
 | `is_enrolled(student, course_id)` | `bool` |
-| `has_completed(student, course_id)` | `bool` |
-| `verify_certificate(certificate_id)` | `bool` — true if exists and not revoked |
-| `get_platform_fee()` | `u32` — current default fee % |
+| `has_completed(student, course_id)` | `Option<bool>` |
+| `verify_certificate(certificate_id)` | `bool` |
+| `list_courses(offset, limit)` | Paginated `Vec<String>` of course IDs; `limit` is capped at 50 |
+| `get_platform_fee(admin)` | `u32`; admin only |
+| `get_fee_config(token)` | `FeeConfig` |
+| `get_arbitration_fee_config()` | `ArbitrationFeeConfig` |
+| `get_risk_fee_config()` | `RiskFeeConfig` |
+| `is_risk_config_enabled()` | `bool` |
+| `is_btc_eth_token(token)` | `bool` |
+| `get_arbitration_case(caller, course_id)` | `Option<ArbitrationCase>` |
+| `get_waitlist(course_id)` | `Option<Vec<Address>>` |
+| `get_instructor_earnings(instructor, token)` | `i128` |
+| `get_instructor_total_earnings(instructor)` | `i128` |
+| `get_instructor_course_count(instructor)` | `u32` |
+| `get_courses_by_instructor(instructor)` | `Vec<String>` |
+| `get_instructor_stats(instructor)` | `InstructorStats` |
+| `get_all_instructors(admin)` | `Vec<Address>`; admin only |
+| `get_instructor_count(admin)` | `u32`; admin only |
+| `get_student_enrollment_count(student)` | `u32` |
+| `get_total_active_enrollments()` | `u32` |
+| `get_platform_enrollment_cap()` | `Option<u32>` |
+| `get_min_review_delay()` | `u32` |
+| `get_min_completion_ledgers()` | `u32` |
+| `get_refund_window()` | `u32` |
+| `get_revocation_challenge_period()` | `u32` |
+| `get_high_value_course_threshold()` | `Option<i128>` |
+| `get_max_courses_limit()` | `u32` |
+| `get_admin_expiry()` | `Option<u32>` |
+| `get_upgrade_timelock()` | `u32` |
+| `get_pending_upgrade()` | `Option<PendingUpgrade>` |
+| `is_approver_address(address)` | `bool` |
+| `is_instructor_frozen(instructor)` | `bool` |
+| `is_student_blocked(student)` | `bool` |
 
 ---
 
@@ -285,6 +378,7 @@ Returns `true` if the certificate exists and has not been revoked. The `get_cert
 | `course_paused` | `course_id` | Course paused |
 | `course_unpaused` | `course_id` | Course unpaused |
 | `course_archived` | `course_id` | Course archived |
+| `refund_issued` | `(student, course_id, amount, platform_amount, instructor_amount, ledger)` | Refund paid via `process_refund()` or `archive_course()` |
 | `student_enrolled` | `(course_id, student, amount_paid)` | Student enrolls and pays |
 | `course_completed` | `(course_id, student)` | Completion marked by admin |
 | `certificate_issued` | `(certificate_id, student, course_id)` | Certificate issued |
@@ -310,7 +404,7 @@ hamplard-contract/
         ├── Makefile                   ← Build / deploy shortcuts
         └── src/
             ├── lib.rs                 ← Full contract logic
-            └── test.rs                ← 14 unit tests
+            └── test.rs                ← 300+ unit tests
 ```
 
 ---

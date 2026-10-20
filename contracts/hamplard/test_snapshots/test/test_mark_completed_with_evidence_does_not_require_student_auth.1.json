@@ -261,7 +261,7 @@
                   "string": "COURSE-AUTH-2"
                 },
                 {
-                  "string": "some_evidence_hash"
+                  "bytes": "736f6d655f65766964656e63655f686173680000000000000000000000000000"
                 }
               ]
             }
@@ -849,7 +849,7 @@
                         "symbol": "evidence_hash"
                       },
                       "val": {
-                        "string": "some_evidence_hash"
+                        "bytes": "736f6d655f65766964656e63655f686173680000000000000000000000000000"
                       }
                     },
                     {

@@ -1700,6 +1700,15 @@ impl HamplardContract {
                                 .set(&DataKey::TotalActiveEnrollments, &(total_active - 1));
                         }
 
+                        Self::emit_refund_issued(
+                            &env,
+                            &course_id,
+                            &student,
+                            platform_amount + instructor_amount,
+                            platform_amount,
+                            instructor_amount,
+                        );
+
                         Self::promote_from_waitlist(&env, &course_id);
                     }
                 }
@@ -2948,13 +2957,13 @@ impl HamplardContract {
         if course.status != CourseStatus::Active {
             panic!("course is not available for enrollment");
         }
-        
+
         if let Some(start) = course.enrollment_start_ledger {
             if env.ledger().sequence() < start {
                 panic!("enrollment has not started for this course");
             }
         }
-            
+
         if !env
             .storage()
             .instance()
@@ -3037,7 +3046,12 @@ impl HamplardContract {
                 .unwrap_or_else(|| panic!("balance overflow during transfer verification"));
 
             if actual_received != course.price {
-                Self::emit_enrollment_failed(&env, &student, &course_id, "TRANSFER_AMOUNT_MISMATCH");
+                Self::emit_enrollment_failed(
+                    &env,
+                    &student,
+                    &course_id,
+                    "TRANSFER_AMOUNT_MISMATCH",
+                );
                 return;
             }
 
@@ -4755,6 +4769,15 @@ impl HamplardContract {
                     .set(&DataKey::TotalActiveEnrollments, &(total_active - 1));
             }
 
+            Self::emit_refund_issued(
+                &env,
+                &course_id,
+                &student,
+                actual_refund_amount,
+                platform_refund,
+                instructor_refund,
+            );
+
             request.status = RefundStatus::Approved;
             request.refund_amount = Some(actual_refund_amount);
         } else {
@@ -5243,6 +5266,29 @@ impl HamplardContract {
     // ----------------------------------------------------------
     // INTERNAL HELPERS
     // ----------------------------------------------------------
+
+    /// Emit the shared per-student refund event used by both
+    /// `process_refund()` and `archive_course()`.
+    fn emit_refund_issued(
+        env: &Env,
+        course_id: &String,
+        student: &Address,
+        amount: i128,
+        platform_amount: i128,
+        instructor_amount: i128,
+    ) {
+        env.events().publish(
+            (Symbol::new(env, "refund_issued"), course_id.clone()),
+            (
+                student.clone(),
+                course_id.clone(),
+                amount,
+                platform_amount,
+                instructor_amount,
+                env.ledger().sequence(),
+            ),
+        );
+    }
 
     fn get_course_internal(env: &Env, course_id: &String) -> Option<Course> {
         if let Some(course) = env
