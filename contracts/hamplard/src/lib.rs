@@ -686,6 +686,8 @@ impl HamplardContract {
     const MAX_CATEGORIES: u32 = 10;
     /// Maximum length of a category name in characters (#165)
     const MAX_CATEGORY_LEN: u32 = 64;
+    /// Maximum length of a certificate revocation reason (#411)
+    const MAX_REVOCATION_REASON_LEN: u32 = 64;
 
     // ----------------------------------------------------------
     // INIT
@@ -2948,13 +2950,13 @@ impl HamplardContract {
         if course.status != CourseStatus::Active {
             panic!("course is not available for enrollment");
         }
-        
+
         if let Some(start) = course.enrollment_start_ledger {
             if env.ledger().sequence() < start {
                 panic!("enrollment has not started for this course");
             }
         }
-            
+
         if !env
             .storage()
             .instance()
@@ -3037,7 +3039,12 @@ impl HamplardContract {
                 .unwrap_or_else(|| panic!("balance overflow during transfer verification"));
 
             if actual_received != course.price {
-                Self::emit_enrollment_failed(&env, &student, &course_id, "TRANSFER_AMOUNT_MISMATCH");
+                Self::emit_enrollment_failed(
+                    &env,
+                    &student,
+                    &course_id,
+                    "TRANSFER_AMOUNT_MISMATCH",
+                );
                 return;
             }
 
@@ -3574,9 +3581,19 @@ impl HamplardContract {
     /// - `admin`          — must match stored admin
     /// - `certificate_id` — the certificate to revoke
     /// - `reason`         — short reason code (e.g. "ACADEMIC_DISHONESTY", "ISSUED_IN_ERROR")
+    ///   must be non-empty and at most `MAX_REVOCATION_REASON_LEN` (64) bytes
+    ///
+    /// # Panics
+    /// - If `reason` is empty or longer than 64 bytes
     pub fn revoke_certificate(env: Env, admin: Address, certificate_id: String, reason: String) {
         admin.require_auth();
         Self::require_admin(&env, &admin, "revoke_certificate");
+        if reason.len() == 0 {
+            panic!("revocation reason cannot be empty");
+        }
+        if reason.len() > Self::MAX_REVOCATION_REASON_LEN {
+            panic!("revocation reason exceeds maximum length");
+        }
         env.storage()
             .instance()
             .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);

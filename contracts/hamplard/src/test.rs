@@ -101,7 +101,6 @@ fn evidence_hash(env: &Env, value: &str) -> BytesN<32> {
     BytesN::from_array(env, &bytes)
 }
 
-
 fn get_enrollment_ref(
     env: &Env,
     client: &HamplardContractClient,
@@ -2552,7 +2551,7 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
     client.request_refund(&refund_student, &refund_course_id);
 
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.process_refund(&admin, &refund_student, &refund_course_id, &true);
+        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
     }));
     assert!(res.is_err(), "old admin must be rejected by process_refund");
 
@@ -3071,9 +3070,7 @@ fn test_unpause_platform_rejects_double_unpause() {
 /// Read the remaining instance TTL of the contract.
 fn instance_ttl(env: &Env, contract_id: &Address) -> u32 {
     use soroban_sdk::testutils::storage::Instance as _;
-    env.as_contract(contract_id, || {
-        env.storage().instance().get_ttl()
-    })
+    env.as_contract(contract_id, || env.storage().instance().get_ttl())
 }
 
 #[test]
@@ -3085,9 +3082,7 @@ fn test_pause_platform_extends_instance_ttl() {
         l.sequence_number += 400_000;
     });
 
-    assert!(
-        instance_ttl(&env, &contract_id) < HamplardContract::INSTANCE_TTL_THRESHOLD
-    );
+    assert!(instance_ttl(&env, &contract_id) < HamplardContract::INSTANCE_TTL_THRESHOLD);
 
     client.pause_platform(&admin);
 
@@ -3108,9 +3103,7 @@ fn test_unpause_platform_extends_instance_ttl() {
         l.sequence_number += 400_000;
     });
 
-    assert!(
-        instance_ttl(&env, &contract_id) < HamplardContract::INSTANCE_TTL_THRESHOLD
-    );
+    assert!(instance_ttl(&env, &contract_id) < HamplardContract::INSTANCE_TTL_THRESHOLD);
 
     client.unpause_platform(&admin);
 
@@ -4737,7 +4730,7 @@ fn test_refund_lifecycle() {
     // Approve refund
     let initial_balance = token::Client::new(&env, &token_id).balance(&student);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     let final_balance = token::Client::new(&env, &token_id).balance(&student);
     assert_eq!(final_balance - initial_balance, 1_000_000_000);
@@ -4802,7 +4795,7 @@ fn test_refund_rejection() {
 
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &false);
+    client.process_refund(&admin, &student, &course_id, &false, &None);
 
     let request = client.get_refund_request(&student, &course_id).unwrap();
     assert_eq!(request.status, RefundStatus::Rejected);
@@ -5420,7 +5413,7 @@ fn test_process_refund_event_includes_admin() {
     client.enroll(&student, &course_id);
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     let (event_student, event_course_id, event_approved, event_admin): (
         Address,
@@ -7548,6 +7541,7 @@ fn test_platform_counter_decrements_on_refund() {
         &student1,
         &String::from_str(&env, "COURSE-001"),
         &true,
+        &None,
     );
 
     // Counter should decrement
@@ -9577,7 +9571,9 @@ fn test_mark_completed_accepts_zeroed_evidence_hash() {
     let evidence = Some(BytesN::from_array(&env, &[0u8; 32]));
     client.mark_completed(&admin, &student, &course_id, &evidence);
 
-    let enrollment = client.get_enrollment(&student, &student, &course_id).unwrap();
+    let enrollment = client
+        .get_enrollment(&student, &student, &course_id)
+        .unwrap();
     assert_eq!(enrollment.evidence_hash, evidence);
     assert_eq!(client.has_completed(&student, &course_id), Some(true));
 }
@@ -11290,7 +11286,7 @@ fn test_process_refund_archives_enrollment_to_history() {
     // Request and approve the refund.
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     // The active enrollment must no longer exist.
     assert!(
@@ -11346,7 +11342,7 @@ fn test_re_enroll_rejects_before_enrollment_start_ledger() {
         &admin,
         &student,
         &course_id,
-        &Some(String::from_str(&env, "evidence")),
+        &Some(evidence_hash(&env, "evidence")),
     );
 
     // Instructor sets the enrollment start ledger in the future
@@ -11381,7 +11377,7 @@ fn test_re_enroll_succeeds_at_enrollment_start_ledger() {
         &admin,
         &student,
         &course_id,
-        &Some(String::from_str(&env, "evidence")),
+        &Some(evidence_hash(&env, "evidence")),
     );
 
     let enrollment_start = env.ledger().sequence() + 10;
@@ -11397,4 +11393,101 @@ fn test_re_enroll_succeeds_at_enrollment_start_ledger() {
         .unwrap();
     assert!(!enrollment.completed);
     assert_eq!(enrollment.enrolled_at_ledger, enrollment_start);
+}
+
+// REVOCATION REASON VALIDATION (#411)
+
+/// Enroll, complete and issue a certificate; returns its ID.
+fn issue_cert_for_reason_tests(
+    env: &Env,
+    client: &HamplardContractClient,
+    token_id: &Address,
+    admin: &Address,
+    instructor: &Address,
+) -> String {
+    let student = Address::generate(env);
+    token::StellarAssetClient::new(env, token_id).mint(&student, &100_000_000_000);
+    register_and_approve_course(
+        env,
+        client,
+        token_id,
+        admin,
+        instructor,
+        "COURSE-REASON",
+        600_000_000,
+    );
+    let course_id = String::from_str(env, "COURSE-REASON");
+    let cert_id = String::from_str(env, "CERT-REASON");
+
+    client.enroll(&student, &course_id);
+    client.mark_completed(
+        admin,
+        &student,
+        &course_id,
+        &Some(evidence_hash(env, "evidence")),
+    );
+    client.issue_certificate(
+        admin,
+        &student,
+        &course_id,
+        &cert_id,
+        &String::from_str(env, "Reason Course"),
+        &get_enrollment_ref(env, client, &student, "COURSE-REASON"),
+        &None,
+        &None,
+    );
+    cert_id
+}
+
+#[test]
+#[should_panic(expected = "revocation reason cannot be empty")]
+fn test_revoke_certificate_empty_reason_panics() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let cert_id = issue_cert_for_reason_tests(&env, &client, &token_id, &admin, &instructor);
+
+    client.revoke_certificate(&admin, &cert_id, &String::from_str(&env, ""));
+}
+
+#[test]
+#[should_panic(expected = "revocation reason exceeds maximum length")]
+fn test_revoke_certificate_oversize_reason_panics() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let cert_id = issue_cert_for_reason_tests(&env, &client, &token_id, &admin, &instructor);
+
+    let too_long = "R".repeat(65);
+    client.revoke_certificate(&admin, &cert_id, &String::from_str(&env, &too_long));
+}
+
+#[test]
+fn test_revoke_certificate_reason_at_max_length_accepted() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let cert_id = issue_cert_for_reason_tests(&env, &client, &token_id, &admin, &instructor);
+
+    let max_reason = String::from_str(&env, &"R".repeat(64));
+    client.revoke_certificate(&admin, &cert_id, &max_reason);
+
+    let cert = client.get_certificate(&admin, &cert_id);
+    assert!(cert.revoked);
+    assert_eq!(cert.revocation_reason, Some(max_reason));
+}
+
+#[test]
+fn test_revoke_certificate_rejected_reason_leaves_certificate_unrevoked() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let cert_id = issue_cert_for_reason_tests(&env, &client, &token_id, &admin, &instructor);
+
+    assert!(client
+        .try_revoke_certificate(&admin, &cert_id, &String::from_str(&env, ""))
+        .is_err());
+    assert!(client
+        .try_revoke_certificate(&admin, &cert_id, &String::from_str(&env, &"R".repeat(65)))
+        .is_err());
+
+    let cert = client.get_certificate(&admin, &cert_id);
+    assert!(!cert.revoked);
+    assert_eq!(cert.revocation_reason, None);
 }
