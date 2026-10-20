@@ -7,6 +7,8 @@ members = [
 [workspace.dependencies]
 soroban-sdk = "22"
 
+[workspace.metadata.deny]
+
 [profile.release]
 opt-level = "z"
 overflow-checks = true
