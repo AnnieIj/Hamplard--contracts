@@ -359,7 +359,7 @@
                   "string": "COURSE-OLD-ADMIN"
                 },
                 {
-                  "string": "evidence"
+                  "bytes": "65766964656e6365000000000000000000000000000000000000000000000000"
                 }
               ]
             }
@@ -1719,7 +1719,7 @@
                         "symbol": "evidence_hash"
                       },
                       "val": {
-                        "string": "evidence"
+                        "bytes": "65766964656e6365000000000000000000000000000000000000000000000000"
                       }
                     },
                     {
@@ -2357,6 +2357,12 @@
                       "val": {
                         "string": "COURSE-OLD-ADMIN-REFUND"
                       }
+                    },
+                    {
+                      "key": {
+                        "symbol": "refund_amount"
+                      },
+                      "val": "void"
                     },
                     {
                       "key": {

@@ -101,7 +101,6 @@ fn evidence_hash(env: &Env, value: &str) -> BytesN<32> {
     BytesN::from_array(env, &bytes)
 }
 
-
 fn get_enrollment_ref(
     env: &Env,
     client: &HamplardContractClient,
@@ -227,7 +226,7 @@ fn test_get_course_returns_none_for_nonexistent_id() {
 }
 
 #[test]
-#[should_panic(expected = "course already registered")]
+#[should_panic(expected = "Error(Contract, #13)")]
 fn test_register_duplicate_course() {
     let (env, contract_id, token_id, _admin, sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -282,7 +281,7 @@ fn test_approve_course_success() {
 }
 
 #[test]
-#[should_panic(expected = "unauthorized: approve_course")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_approve_course_unauthorized() {
     let (env, contract_id, token_id, _admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -306,7 +305,7 @@ fn test_approve_course_unauthorized() {
 }
 
 #[test]
-#[should_panic(expected = "course is not pending approval")]
+#[should_panic(expected = "Error(Contract, #17)")]
 fn test_approve_already_active_course() {
     let (env, contract_id, token_id, admin, sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -391,7 +390,7 @@ fn test_enroll_success_with_payment_split() {
 }
 
 #[test]
-#[should_panic(expected = "enrollment has not started for this course")]
+#[should_panic(expected = "Error(Contract, #34)")]
 fn test_enroll_rejects_before_enrollment_start_ledger() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -621,7 +620,7 @@ fn test_enroll_zero_price_free_course() {
 }
 
 #[test]
-#[should_panic(expected = "overflow computing platform fee")]
+#[should_panic(expected = "Error(Contract, #25)")]
 fn test_enroll_fee_overflow() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -668,7 +667,7 @@ fn test_enroll_fee_overflow() {
 }
 
 #[test]
-#[should_panic(expected = "already enrolled in this course")]
+#[should_panic(expected = "Error(Contract, #35)")]
 fn test_enroll_duplicate() {
     let (env, contract_id, token_id, admin, sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -692,7 +691,7 @@ fn test_enroll_duplicate() {
 }
 
 #[test]
-#[should_panic(expected = "admin cannot enroll in courses")]
+#[should_panic(expected = "Error(Contract, #32)")]
 fn test_enroll_admin_rejected() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -790,7 +789,7 @@ fn test_enrollment_receipt_event_emitted_with_payment_breakdown() {
 }
 
 #[test]
-#[should_panic(expected = "course is not available for enrollment")]
+#[should_panic(expected = "Error(Contract, #34)")]
 fn test_enroll_pending_course() {
     let (env, contract_id, token_id, _admin, sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -814,7 +813,7 @@ fn test_enroll_pending_course() {
 }
 
 #[test]
-#[should_panic(expected = "cannot enroll in the same ledger the course was registered")]
+#[should_panic(expected = "Error(Contract, #34)")]
 fn test_enroll_same_ledger_as_registration_rejected() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -842,7 +841,7 @@ fn test_enroll_same_ledger_as_registration_rejected() {
 }
 
 #[test]
-#[should_panic(expected = "instructor cannot enroll in own course")]
+#[should_panic(expected = "Error(Contract, #32)")]
 fn test_instructor_self_enrollment_rejected() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -1030,7 +1029,7 @@ fn test_certificate_issued_event_contains_full_issuance_details() {
 }
 
 #[test]
-#[should_panic(expected = "student has not completed this course")]
+#[should_panic(expected = "Error(Contract, #39)")]
 fn test_certificate_requires_completion() {
     let (env, contract_id, token_id, admin, sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -1395,7 +1394,7 @@ fn test_pause_and_unpause_course() {
 
 /// Double-pause must be rejected (Active-status precondition)
 #[test]
-#[should_panic(expected = "course is not active")]
+#[should_panic(expected = "Error(Contract, #20)")]
 fn test_pause_course_double_pause_rejected() {
     let (env, contract_id, token_id, admin, sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -1601,7 +1600,7 @@ fn test_mark_completed_with_evidence_does_not_require_student_auth() {
 }
 
 #[test]
-#[should_panic(expected = "enrollment course_id mismatch")]
+#[should_panic(expected = "Error(Contract, #39)")]
 fn test_mark_completed_rejects_mismatched_enrollment_course_id() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -1643,7 +1642,7 @@ fn test_mark_completed_rejects_mismatched_enrollment_course_id() {
 }
 
 #[test]
-#[should_panic(expected = "course must be paused before archiving")]
+#[should_panic(expected = "Error(Contract, #23)")]
 fn test_archive_course_blocked_by_active_enrollment() {
     let (env, contract_id, token_id, admin, sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -1793,7 +1792,7 @@ fn test_archive_course_incremental_refunds() {
 }
 
 #[test]
-#[should_panic(expected = "exceeds maximum allowed")]
+#[should_panic(expected = "Error(Contract, #24)")]
 fn test_archive_course_rejects_oversized_refund_list() {
     let (env, contract_id, token_id, admin, sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -1823,7 +1822,6 @@ fn test_archive_course_rejects_oversized_refund_list() {
 }
 
 #[test]
-#[should_panic]
 fn test_enroll_insufficient_funds_rollback() {
     let (env, contract_id, token_id, admin, sec_admin, treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -1845,12 +1843,14 @@ fn test_enroll_insufficient_funds_rollback() {
     // Student has enough for platform fee (100_000_000) but not the full course price
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &150_000_000);
 
-    // Enroll should panic because instructor transfer will fail
+    // Enrollment exits cleanly when the token transfer fails.
     client.enroll(&student, &course_id);
 
-    // Verify treasury didn't receive any tokens (rollback proof)
+    // Verify no funds moved and no enrollment state was written.
     assert_eq!(token_client.balance(&treasury), 0);
     assert_eq!(token_client.balance(&student), 150_000_000);
+    assert_eq!(token_client.balance(&contract_id), 0);
+    assert!(!client.is_enrolled(&student, &course_id));
 }
 
 #[test]
@@ -1900,7 +1900,7 @@ fn test_treasury_update_delay() {
 }
 
 #[test]
-#[should_panic(expected = "new treasury address must differ from current treasury")]
+#[should_panic(expected = "Error(Contract, #6)")]
 fn test_update_treasury_same_address_rejected() {
     let (env, contract_id, token_id, admin, sec_admin, treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -1914,7 +1914,7 @@ fn test_update_treasury_same_address_rejected() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "course_id exceeds maximum length")]
+#[should_panic(expected = "Error(Contract, #11)")]
 fn test_register_course_id_too_long() {
     let (env, contract_id, token_id, admin, sec_admin, treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -1953,7 +1953,7 @@ fn test_register_course_id_at_max_length_succeeds() {
 }
 
 #[test]
-#[should_panic(expected = "course_title exceeds maximum length")]
+#[should_panic(expected = "Error(Contract, #41)")]
 fn test_issue_certificate_title_too_long() {
     let (env, contract_id, token_id, admin, sec_admin, treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -1992,7 +1992,7 @@ fn test_issue_certificate_title_too_long() {
 }
 
 #[test]
-#[should_panic(expected = "certificate_id exceeds maximum length")]
+#[should_panic(expected = "Error(Contract, #41)")]
 fn test_issue_certificate_id_too_long() {
     let (env, contract_id, token_id, admin, sec_admin, treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -2035,7 +2035,7 @@ fn test_issue_certificate_id_too_long() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "course must be paused before archiving")]
+#[should_panic(expected = "Error(Contract, #23)")]
 fn test_archive_active_course_rejected() {
     let (env, contract_id, token_id, admin, sec_admin, treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -2134,7 +2134,7 @@ fn test_archive_paused_course_succeeds() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "contract already initialized")]
+#[should_panic(expected = "Error(Contract, #1)")]
 fn test_init_cannot_be_called_twice() {
     let (env, contract_id, _, admin, sec_admin, treasury, _) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -2201,7 +2201,7 @@ fn test_init_emits_initialized_event_once() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "course token is not approved")]
+#[should_panic(expected = "Error(Contract, #34)")]
 fn test_enroll_with_non_whitelisted_token_fails() {
     let (env, contract_id, _, admin, sec_admin, _, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -2265,7 +2265,7 @@ fn test_enroll_succeeds_after_token_removed_from_whitelist_is_re_added() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "certificate ID already exists")]
+#[should_panic(expected = "Error(Contract, #42)")]
 fn test_certificate_id_collision_across_courses() {
     let (env, contract_id, token_id, admin, sec_admin, _, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -2360,7 +2360,7 @@ fn test_two_step_admin_transfer_success() {
 }
 
 #[test]
-#[should_panic(expected = "no pending admin")]
+#[should_panic(expected = "Error(Contract, #4)")]
 fn test_accept_admin_without_proposal_fails() {
     let (env, contract_id, _, _, sec_admin, _, _) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -2372,7 +2372,7 @@ fn test_accept_admin_without_proposal_fails() {
 }
 
 #[test]
-#[should_panic(expected = "callers are not the pending admins")]
+#[should_panic(expected = "Error(Contract, #4)")]
 fn test_accept_admin_wrong_address_fails() {
     let (env, contract_id, _, admin, sec_admin, _, _) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -2389,7 +2389,7 @@ fn test_accept_admin_wrong_address_fails() {
 }
 
 #[test]
-#[should_panic(expected = "unauthorized: update_default_fee")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_old_admin_loses_access_after_transfer_completes() {
     let (env, contract_id, _, admin, sec_admin, _, _) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -2552,7 +2552,7 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
     client.request_refund(&refund_student, &refund_course_id);
 
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.process_refund(&admin, &refund_student, &refund_course_id, &true);
+        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
     }));
     assert!(res.is_err(), "old admin must be rejected by process_refund");
 
@@ -2781,7 +2781,7 @@ fn test_batch_enroll_success() {
 }
 
 #[test]
-#[should_panic(expected = "course is not available for enrollment")]
+#[should_panic(expected = "Error(Contract, #34)")]
 fn test_batch_enroll_fails_on_invalid_course() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -2822,7 +2822,7 @@ fn test_batch_enroll_fails_on_invalid_course() {
 }
 
 #[test]
-#[should_panic(expected = "duplicate course in batch")]
+#[should_panic(expected = "Error(Contract, #29)")]
 fn test_batch_enroll_rejects_duplicates() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -2883,7 +2883,7 @@ fn test_batch_enroll_large_unique_batch_succeeds() {
 }
 
 #[test]
-#[should_panic(expected = "duplicate course in batch")]
+#[should_panic(expected = "Error(Contract, #29)")]
 fn test_batch_enroll_rejects_duplicate_in_large_batch() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -3014,7 +3014,7 @@ fn test_batch_enroll_emits_event_for_each_enrollment() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "unauthorized: mark_completed")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_mark_completed_unauthorized_includes_operation() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -3040,7 +3040,7 @@ fn test_mark_completed_unauthorized_includes_operation() {
 }
 
 #[test]
-#[should_panic(expected = "unauthorized: pause_platform")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_pause_platform_unauthorized_includes_operation() {
     let (env, contract_id, _token_id, _admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -3050,7 +3050,7 @@ fn test_pause_platform_unauthorized_includes_operation() {
 }
 
 #[test]
-#[should_panic(expected = "platform is already paused")]
+#[should_panic(expected = "Error(Contract, #30)")]
 fn test_pause_platform_rejects_double_pause() {
     let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -3060,7 +3060,7 @@ fn test_pause_platform_rejects_double_pause() {
 }
 
 #[test]
-#[should_panic(expected = "platform is not paused")]
+#[should_panic(expected = "Error(Contract, #30)")]
 fn test_unpause_platform_rejects_double_unpause() {
     let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -3071,9 +3071,7 @@ fn test_unpause_platform_rejects_double_unpause() {
 /// Read the remaining instance TTL of the contract.
 fn instance_ttl(env: &Env, contract_id: &Address) -> u32 {
     use soroban_sdk::testutils::storage::Instance as _;
-    env.as_contract(contract_id, || {
-        env.storage().instance().get_ttl()
-    })
+    env.as_contract(contract_id, || env.storage().instance().get_ttl())
 }
 
 #[test]
@@ -3085,9 +3083,7 @@ fn test_pause_platform_extends_instance_ttl() {
         l.sequence_number += 400_000;
     });
 
-    assert!(
-        instance_ttl(&env, &contract_id) < HamplardContract::INSTANCE_TTL_THRESHOLD
-    );
+    assert!(instance_ttl(&env, &contract_id) < HamplardContract::INSTANCE_TTL_THRESHOLD);
 
     client.pause_platform(&admin);
 
@@ -3108,9 +3104,7 @@ fn test_unpause_platform_extends_instance_ttl() {
         l.sequence_number += 400_000;
     });
 
-    assert!(
-        instance_ttl(&env, &contract_id) < HamplardContract::INSTANCE_TTL_THRESHOLD
-    );
+    assert!(instance_ttl(&env, &contract_id) < HamplardContract::INSTANCE_TTL_THRESHOLD);
 
     client.unpause_platform(&admin);
 
@@ -3121,7 +3115,7 @@ fn test_unpause_platform_extends_instance_ttl() {
 }
 
 #[test]
-#[should_panic(expected = "unauthorized: add_approved_token")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_add_approved_token_unauthorized_includes_operation() {
     let (env, contract_id, token_id, _admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -3133,7 +3127,7 @@ fn test_add_approved_token_unauthorized_includes_operation() {
 }
 
 #[test]
-#[should_panic(expected = "unauthorized: revoke_certificate")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_revoke_certificate_unauthorized_includes_operation() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -3246,7 +3240,7 @@ fn test_multiple_enrollments_aggregate_earnings() {
 }
 
 #[test]
-#[should_panic(expected = "insufficient earnings balance")]
+#[should_panic(expected = "Error(Contract, #40)")]
 fn test_unauthorized_instructor_withdraw_fails() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -3495,7 +3489,7 @@ fn test_withdraw_earnings_destination_auth_is_not_enough() {
 }
 
 #[test]
-#[should_panic(expected = "destination cannot be the contract address")]
+#[should_panic(expected = "Error(Contract, #40)")]
 fn test_withdraw_earnings_rejects_contract_as_destination() {
     let (env, contract_id, token_id, admin, _s, _t, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -3512,7 +3506,7 @@ fn test_withdraw_earnings_rejects_contract_as_destination() {
 }
 
 #[test]
-#[should_panic(expected = "instructor has reached the maximum number of course registrations")]
+#[should_panic(expected = "Error(Contract, #15)")]
 fn test_registration_limit_enforced() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -3878,7 +3872,7 @@ fn test_enroll_at_capacity_succeeds() {
 }
 
 #[test]
-#[should_panic(expected = "course has reached maximum enrollment capacity")]
+#[should_panic(expected = "Error(Contract, #34)")]
 fn test_enroll_beyond_capacity_rejected() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -3945,7 +3939,7 @@ fn test_enroll_unlimited_capacity() {
 }
 
 #[test]
-#[should_panic(expected = "course has reached maximum enrollment capacity")]
+#[should_panic(expected = "Error(Contract, #34)")]
 fn test_batch_enroll_respects_capacity() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -3998,7 +3992,7 @@ fn test_batch_enroll_respects_capacity() {
 }
 
 #[test]
-#[should_panic(expected = "batch size")]
+#[should_panic(expected = "Error(Contract, #28)")]
 fn test_batch_enroll_rejects_oversized_batch() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -4033,7 +4027,7 @@ fn test_batch_enroll_rejects_oversized_batch() {
 }
 
 #[test]
-#[should_panic(expected = "total earned overflow")]
+#[should_panic(expected = "Error(Contract, #25)")]
 fn test_enroll_total_earned_overflow() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -4064,7 +4058,7 @@ fn test_enroll_total_earned_overflow() {
 }
 
 #[test]
-#[should_panic(expected = "has not elapsed")]
+#[should_panic(expected = "Error(Contract, #16)")]
 fn test_course_approval_time_lock_premature_panics() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -4178,7 +4172,7 @@ fn test_get_enrollment_authorized_access() {
 }
 
 #[test]
-#[should_panic(expected = "unauthorized")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_get_enrollment_unauthorized_access() {
     let (env, contract_id, token_id, admin, sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -4207,7 +4201,7 @@ fn test_get_enrollment_unauthorized_access() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "course ID is within archival cooldown period")]
+#[should_panic(expected = "Error(Contract, #14)")]
 fn test_archive_then_reregister_fails() {
     let (env, contract_id, token_id, admin, sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -4247,7 +4241,7 @@ fn test_archive_then_reregister_fails() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "already marked as completed")]
+#[should_panic(expected = "Error(Contract, #39)")]
 fn test_concurrent_completion() {
     let (env, contract_id, token_id, admin, sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -4286,7 +4280,7 @@ fn test_concurrent_completion() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "price is outside the expected USDC precision range")]
+#[should_panic(expected = "Error(Contract, #12)")]
 fn test_register_course_price_too_low_rejected() {
     let (env, contract_id, token_id, _admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -4305,7 +4299,7 @@ fn test_register_course_price_too_low_rejected() {
 }
 
 #[test]
-#[should_panic(expected = "price is outside the expected USDC precision range")]
+#[should_panic(expected = "Error(Contract, #12)")]
 fn test_register_course_price_too_high_rejected() {
     let (env, contract_id, token_id, _admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -4505,7 +4499,7 @@ fn test_course_certificate_id_collision_verification() {
 }
 
 #[test]
-#[should_panic(expected = "proposed admin addresses are identical to current admin addresses")]
+#[should_panic(expected = "Error(Contract, #4)")]
 fn test_transfer_admin_rejects_identical_addresses() {
     let (env, contract_id, _token_id, admin, sec_admin, _treasury, _instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -4515,7 +4509,7 @@ fn test_transfer_admin_rejects_identical_addresses() {
 }
 
 #[test]
-#[should_panic(expected = "admin and secondary_admin must be distinct addresses")]
+#[should_panic(expected = "Error(Contract, #4)")]
 fn test_transfer_admin_rejects_same_new_admin_and_secondary() {
     let (env, contract_id, _token_id, admin, sec_admin, _treasury, _instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -4608,7 +4602,7 @@ fn test_student_blocklist_lifecycle() {
 }
 
 #[test]
-#[should_panic(expected = "student already blocked")]
+#[should_panic(expected = "Error(Contract, #31)")]
 fn test_block_student_already_blocked_panics() {
     let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -4622,7 +4616,7 @@ fn test_block_student_already_blocked_panics() {
 }
 
 #[test]
-#[should_panic(expected = "student not blocked")]
+#[should_panic(expected = "Error(Contract, #31)")]
 fn test_unblock_student_not_blocked_panics() {
     let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -4635,7 +4629,7 @@ fn test_unblock_student_not_blocked_panics() {
 }
 
 #[test]
-#[should_panic(expected = "instructor already frozen")]
+#[should_panic(expected = "Error(Contract, #9)")]
 fn test_freeze_instructor_already_frozen_panics() {
     let (env, contract_id, _token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -4648,7 +4642,7 @@ fn test_freeze_instructor_already_frozen_panics() {
 }
 
 #[test]
-#[should_panic(expected = "instructor not frozen")]
+#[should_panic(expected = "Error(Contract, #9)")]
 fn test_unfreeze_instructor_not_frozen_panics() {
     let (env, contract_id, _token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -4660,7 +4654,7 @@ fn test_unfreeze_instructor_not_frozen_panics() {
 }
 
 #[test]
-#[should_panic(expected = "student is blocked")]
+#[should_panic(expected = "Error(Contract, #31)")]
 fn test_blocked_student_cannot_enroll() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -4681,7 +4675,7 @@ fn test_blocked_student_cannot_enroll() {
 }
 
 #[test]
-#[should_panic(expected = "instructor is frozen")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn test_frozen_instructor_cannot_register_course() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -4737,7 +4731,7 @@ fn test_refund_lifecycle() {
     // Approve refund
     let initial_balance = token::Client::new(&env, &token_id).balance(&student);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     let final_balance = token::Client::new(&env, &token_id).balance(&student);
     assert_eq!(final_balance - initial_balance, 1_000_000_000);
@@ -4748,7 +4742,7 @@ fn test_refund_lifecycle() {
 }
 
 #[test]
-#[should_panic(expected = "refund window has expired")]
+#[should_panic(expected = "Error(Contract, #45)")]
 fn test_refund_request_outside_window_fails() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -4802,7 +4796,7 @@ fn test_refund_rejection() {
 
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &false);
+    client.process_refund(&admin, &student, &course_id, &false, &None);
 
     let request = client.get_refund_request(&student, &course_id).unwrap();
     assert_eq!(request.status, RefundStatus::Rejected);
@@ -4810,7 +4804,7 @@ fn test_refund_rejection() {
 }
 
 #[test]
-#[should_panic(expected = "instructor is frozen")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn test_frozen_instructor_enrollment_blocked() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -5195,7 +5189,7 @@ fn test_events_emitted_for_admin_operations() {
 }
 
 #[test]
-#[should_panic(expected = "no prior enrollment found for this course")]
+#[should_panic(expected = "Error(Contract, #39)")]
 fn test_re_enroll_without_prior_enrollment_fails() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -5217,7 +5211,7 @@ fn test_re_enroll_without_prior_enrollment_fails() {
 }
 
 #[test]
-#[should_panic(expected = "current enrollment has not been completed yet")]
+#[should_panic(expected = "Error(Contract, #39)")]
 fn test_re_enroll_before_completion_fails() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -5299,7 +5293,7 @@ fn test_re_enroll_multiple_times_accumulates_history() {
 }
 
 #[test]
-#[should_panic(expected = "unauthorized")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_get_enrollment_history_unauthorized_access() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -5420,7 +5414,7 @@ fn test_process_refund_event_includes_admin() {
     client.enroll(&student, &course_id);
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     let (event_student, event_course_id, event_approved, event_admin): (
         Address,
@@ -5527,7 +5521,7 @@ fn test_get_certificate_authorized_roles() {
 }
 
 #[test]
-#[should_panic(expected = "unauthorized")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_get_certificate_unauthorized_third_party_fails() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -5773,7 +5767,7 @@ fn test_get_courses_by_instructor_empty_for_unknown_instructor() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "minimum enrollment duration has not elapsed")]
+#[should_panic(expected = "Error(Contract, #39)")]
 fn test_mark_completed_before_min_duration_fails() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -5880,7 +5874,7 @@ fn test_mark_completed_default_zero_delay_allows_immediate_completion() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "course is not available for enrollment")]
+#[should_panic(expected = "Error(Contract, #34)")]
 fn test_enroll_rejected_for_just_paused_course() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -5912,7 +5906,7 @@ fn test_enroll_rejected_for_just_paused_course() {
 // --- Issue: Empty certificate ID should be rejected ---
 
 #[test]
-#[should_panic(expected = "certificate_id cannot be empty")]
+#[should_panic(expected = "Error(Contract, #41)")]
 fn test_issue_certificate_empty_id_rejected() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -5955,7 +5949,7 @@ fn test_issue_certificate_empty_id_rejected() {
 // --- Issue: Double revocation should be rejected ---
 
 #[test]
-#[should_panic(expected = "certificate is already revoked")]
+#[should_panic(expected = "Error(Contract, #44)")]
 fn test_revoke_certificate_double_revocation_rejected() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -6071,7 +6065,7 @@ fn test_revoke_certificate_metadata_unchanged_after_rejected_double_revoke() {
 }
 
 #[test]
-#[should_panic(expected = "certificate ID already exists")]
+#[should_panic(expected = "Error(Contract, #42)")]
 fn test_revoke_certificate_id_cannot_be_reused_to_unrevoke() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -6149,7 +6143,7 @@ fn test_revoke_certificate_id_cannot_be_reused_to_unrevoke() {
 // --- Issue: Same-address admin transfer should be rejected ---
 
 #[test]
-#[should_panic(expected = "proposed admin addresses are identical to current admin addresses")]
+#[should_panic(expected = "Error(Contract, #4)")]
 fn test_transfer_admin_same_address_rejected() {
     let (env, contract_id, _token_id, admin, sec_admin, _treasury, _instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -6161,7 +6155,7 @@ fn test_transfer_admin_same_address_rejected() {
 // --- Issue: Enrollment expiry scenarios ---
 
 #[test]
-#[should_panic(expected = "enrollment has expired")]
+#[should_panic(expected = "Error(Contract, #39)")]
 fn test_mark_completed_panics_when_enrollment_expired() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -6654,7 +6648,7 @@ fn test_refund_request_at_window_boundary_succeeds() {
 }
 
 #[test]
-#[should_panic(expected = "refund window has expired")]
+#[should_panic(expected = "Error(Contract, #45)")]
 fn test_refund_request_one_ledger_past_window_rejected() {
     // A request at elapsed == window + 1 must be rejected.
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
@@ -6688,7 +6682,7 @@ fn test_refund_request_one_ledger_past_window_rejected() {
 }
 
 #[test]
-#[should_panic(expected = "refund window has expired")]
+#[should_panic(expected = "Error(Contract, #45)")]
 fn test_refund_request_far_past_window_rejected() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -7072,7 +7066,7 @@ fn test_instructor_can_update_content_hash_on_paused_course() {
 }
 
 #[test]
-#[should_panic(expected = "cannot update content hash of an archived course")]
+#[should_panic(expected = "Error(Contract, #10)")]
 fn test_update_content_hash_archived_course_rejected() {
     let (env, contract_id, token_id, admin, sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -7097,7 +7091,7 @@ fn test_update_content_hash_archived_course_rejected() {
 }
 
 #[test]
-#[should_panic(expected = "unauthorized")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_update_content_hash_random_caller_rejected() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -7246,7 +7240,7 @@ fn test_admin_operations_succeed_before_expiry() {
 }
 
 #[test]
-#[should_panic(expected = "admin role has expired")]
+#[should_panic(expected = "Error(Contract, #3)")]
 fn test_admin_operations_blocked_after_expiry() {
     let (env, contract_id, token_id, admin, sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -7355,7 +7349,7 @@ fn test_platform_pause_lifecycle_end_to_end() {
 }
 
 #[test]
-#[should_panic(expected = "platform is paused")]
+#[should_panic(expected = "Error(Contract, #30)")]
 fn test_enroll_blocked_during_platform_pause() {
     let (env, contract_id, token_id, admin, sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -7378,7 +7372,7 @@ fn test_enroll_blocked_during_platform_pause() {
 }
 
 #[test]
-#[should_panic(expected = "platform is paused")]
+#[should_panic(expected = "Error(Contract, #30)")]
 fn test_batch_enroll_blocked_during_platform_pause() {
     let (env, contract_id, token_id, admin, sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -7439,7 +7433,7 @@ fn test_enrollment_succeeds_below_platform_cap() {
 }
 
 #[test]
-#[should_panic(expected = "platform has reached maximum total enrollment capacity")]
+#[should_panic(expected = "Error(Contract, #34)")]
 fn test_enrollment_blocked_at_platform_cap() {
     let (env, contract_id, token_id, admin, sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -7548,6 +7542,7 @@ fn test_platform_counter_decrements_on_refund() {
         &student1,
         &String::from_str(&env, "COURSE-001"),
         &true,
+        &None,
     );
 
     // Counter should decrement
@@ -7565,7 +7560,7 @@ fn test_platform_counter_decrements_on_refund() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "cannot mark completion for archived course")]
+#[should_panic(expected = "Error(Contract, #10)")]
 fn test_mark_completed_on_archived_course_rejected() {
     let (env, contract_id, token_id, admin, sec_admin, treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -7612,7 +7607,7 @@ fn test_mark_completed_on_archived_course_rejected() {
 }
 
 #[test]
-#[should_panic(expected = "cannot mark completion for archived course")]
+#[should_panic(expected = "Error(Contract, #10)")]
 fn test_mark_completed_rejects_archived_course_even_with_active_enrollment() {
     let (env, contract_id, token_id, admin, sec_admin, treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -7734,7 +7729,7 @@ fn test_set_prerequisite_courses_success() {
 }
 
 #[test]
-#[should_panic(expected = "unauthorized")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_set_prerequisite_courses_unauthorized() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -7770,7 +7765,7 @@ fn test_set_prerequisite_courses_unauthorized() {
 }
 
 #[test]
-#[should_panic(expected = "course cannot be its own prerequisite")]
+#[should_panic(expected = "Error(Contract, #26)")]
 fn test_set_prerequisite_courses_self_reference_rejected() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -7793,7 +7788,7 @@ fn test_set_prerequisite_courses_self_reference_rejected() {
 }
 
 #[test]
-#[should_panic(expected = "prerequisite course not found")]
+#[should_panic(expected = "Error(Contract, #26)")]
 fn test_set_prerequisite_courses_nonexistent_rejected() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -7819,7 +7814,7 @@ fn test_set_prerequisite_courses_nonexistent_rejected() {
 }
 
 #[test]
-#[should_panic(expected = "prerequisite course not completed")]
+#[should_panic(expected = "Error(Contract, #26)")]
 fn test_enroll_blocked_without_completed_prerequisite() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -7858,7 +7853,7 @@ fn test_enroll_blocked_without_completed_prerequisite() {
 }
 
 #[test]
-#[should_panic(expected = "prerequisite course not completed")]
+#[should_panic(expected = "Error(Contract, #26)")]
 fn test_enroll_blocked_when_prerequisite_completed_but_not_certified() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -7961,7 +7956,7 @@ fn test_enroll_succeeds_with_completed_and_certified_prerequisite() {
 }
 
 #[test]
-#[should_panic(expected = "prerequisite course not completed")]
+#[should_panic(expected = "Error(Contract, #26)")]
 fn test_enroll_blocked_when_prerequisite_certificate_revoked() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -8024,7 +8019,7 @@ fn test_enroll_blocked_when_prerequisite_certificate_revoked() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "certificate already issued for this enrollment")]
+#[should_panic(expected = "Error(Contract, #42)")]
 fn test_issue_certificate_after_revoke_is_rejected() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -8193,7 +8188,7 @@ fn test_propose_upgrade_authorized() {
 }
 
 #[test]
-#[should_panic(expected = "unauthorized: requires both admin signatures")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_propose_upgrade_unauthorized() {
     let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -8206,7 +8201,7 @@ fn test_propose_upgrade_unauthorized() {
 }
 
 #[test]
-#[should_panic(expected = "upgrade time-lock has not elapsed")]
+#[should_panic(expected = "Error(Contract, #49)")]
 fn test_upgrade_contract_before_timelock_fails() {
     let (env, contract_id, _token_id, admin, sec_admin, _treasury, _instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -8219,7 +8214,7 @@ fn test_upgrade_contract_before_timelock_fails() {
 }
 
 #[test]
-#[should_panic(expected = "unauthorized: requires both admin signatures")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_upgrade_contract_unauthorized_fails() {
     let (env, contract_id, _token_id, admin, sec_admin, _treasury, _instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -8232,7 +8227,7 @@ fn test_upgrade_contract_unauthorized_fails() {
 }
 
 #[test]
-#[should_panic(expected = "no pending upgrade")]
+#[should_panic(expected = "Error(Contract, #49)")]
 fn test_upgrade_contract_without_proposal_fails() {
     let (env, contract_id, _token_id, admin, sec_admin, _treasury, _instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -8279,7 +8274,7 @@ fn test_cancel_upgrade_authorized() {
 }
 
 #[test]
-#[should_panic(expected = "unauthorized: requires both admin signatures")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_cancel_upgrade_unauthorized_fails() {
     let (env, contract_id, _token_id, admin, sec_admin, _treasury, _instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -8301,7 +8296,7 @@ fn test_set_upgrade_timelock_authorized() {
 }
 
 #[test]
-#[should_panic(expected = "unauthorized: requires both admin signatures")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_set_upgrade_timelock_unauthorized_fails() {
     let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -8359,7 +8354,7 @@ fn test_issue_141_certificate_course_id_matches_enrollment() {
 }
 
 #[test]
-#[should_panic(expected = "enrollment not found")]
+#[should_panic(expected = "Error(Contract, #38)")]
 fn test_issue_141_certificate_requires_enrollment_in_course() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -8541,7 +8536,7 @@ fn test_issue_146_student_can_challenge_pending_revocation() {
 }
 
 #[test]
-#[should_panic(expected = "only the certificate holder may challenge a revocation")]
+#[should_panic(expected = "Error(Contract, #44)")]
 fn test_issue_146_unauthorized_challenge_fails() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -8583,7 +8578,7 @@ fn test_issue_146_unauthorized_challenge_fails() {
 }
 
 #[test]
-#[should_panic(expected = "certificate has no pending revocation to challenge")]
+#[should_panic(expected = "Error(Contract, #44)")]
 fn test_issue_146_challenge_without_revocation_fails() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -8622,7 +8617,7 @@ fn test_issue_146_challenge_without_revocation_fails() {
 }
 
 #[test]
-#[should_panic(expected = "revocation challenge period has expired")]
+#[should_panic(expected = "Error(Contract, #44)")]
 fn test_issue_146_late_challenge_fails() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -8720,7 +8715,7 @@ fn test_issue_146_revocation_becomes_permanent_after_deadline() {
 }
 
 #[test]
-#[should_panic(expected = "certificate is already revoked")]
+#[should_panic(expected = "Error(Contract, #44)")]
 fn test_issue_146_double_revocation_rejected() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -9074,7 +9069,7 @@ fn test_enrollment_rejected_event_emitted_for_archived_course() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "course_id contains invalid characters")]
+#[should_panic(expected = "Error(Contract, #11)")]
 fn test_register_course_rejects_null_byte_in_id() {
     let (env, contract_id, token_id, _admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -9097,7 +9092,7 @@ fn test_register_course_rejects_null_byte_in_id() {
 }
 
 #[test]
-#[should_panic(expected = "course_id contains invalid characters")]
+#[should_panic(expected = "Error(Contract, #11)")]
 fn test_register_course_rejects_control_characters_in_id() {
     let (env, contract_id, token_id, _admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -9120,7 +9115,7 @@ fn test_register_course_rejects_control_characters_in_id() {
 }
 
 #[test]
-#[should_panic(expected = "course_id contains invalid characters")]
+#[should_panic(expected = "Error(Contract, #11)")]
 fn test_register_course_rejects_delete_character_in_id() {
     let (env, contract_id, token_id, _admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -9191,7 +9186,7 @@ fn test_register_course_accepts_unicode_above_0x7E() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "already marked as completed")]
+#[should_panic(expected = "Error(Contract, #39)")]
 fn test_mark_completed_twice_rejected() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -9277,7 +9272,7 @@ fn test_mark_completed_twice_idempotency_check() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "governance window has not elapsed")]
+#[should_panic(expected = "Error(Contract, #16)")]
 fn test_approve_course_immediately_after_init_rejected() {
     let env = Env::default();
     env.mock_all_auths();
@@ -9577,7 +9572,9 @@ fn test_mark_completed_accepts_zeroed_evidence_hash() {
     let evidence = Some(BytesN::from_array(&env, &[0u8; 32]));
     client.mark_completed(&admin, &student, &course_id, &evidence);
 
-    let enrollment = client.get_enrollment(&student, &student, &course_id).unwrap();
+    let enrollment = client
+        .get_enrollment(&student, &student, &course_id)
+        .unwrap();
     assert_eq!(enrollment.evidence_hash, evidence);
     assert_eq!(client.has_completed(&student, &course_id), Some(true));
 }
@@ -9626,7 +9623,7 @@ fn test_mark_completed_with_evidence_needs_no_student_signature() {
 }
 
 #[test]
-#[should_panic(expected = "unauthorized")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_get_certificate_denies_third_party_even_with_student_auth() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -9718,7 +9715,7 @@ fn test_get_certificate_allows_student_instructor_and_admin() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "instructor is frozen")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn test_frozen_instructor_cannot_set_enrollment_expiry() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -9765,7 +9762,7 @@ fn test_admin_can_set_enrollment_expiry_for_frozen_instructor() {
 }
 
 #[test]
-#[should_panic(expected = "instructor is frozen")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn test_frozen_instructor_cannot_update_content_hash() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -9813,7 +9810,7 @@ fn test_admin_can_update_content_hash_for_frozen_instructor() {
 }
 
 #[test]
-#[should_panic(expected = "instructor is frozen")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn test_frozen_instructor_cannot_set_prerequisite_courses() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -9837,7 +9834,7 @@ fn test_frozen_instructor_cannot_set_prerequisite_courses() {
 }
 
 #[test]
-#[should_panic(expected = "instructor is frozen")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn test_frozen_instructor_cannot_unpause_course() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -9861,7 +9858,7 @@ fn test_frozen_instructor_cannot_unpause_course() {
 }
 
 #[test]
-#[should_panic(expected = "course_id cannot be empty")]
+#[should_panic(expected = "Error(Contract, #11)")]
 fn test_register_course_rejects_empty_course_id() {
     let (env, contract_id, token_id, _admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -9879,7 +9876,7 @@ fn test_register_course_rejects_empty_course_id() {
 }
 
 #[test]
-#[should_panic(expected = "max_capacity must be greater than zero")]
+#[should_panic(expected = "Error(Contract, #11)")]
 fn test_register_course_rejects_zero_max_capacity() {
     let (env, contract_id, token_id, _admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -9897,7 +9894,7 @@ fn test_register_course_rejects_zero_max_capacity() {
 }
 
 #[test]
-#[should_panic(expected = "max_capacity must be greater than zero")]
+#[should_panic(expected = "Error(Contract, #11)")]
 fn test_update_course_rejects_zero_max_capacity() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -10478,7 +10475,7 @@ fn test_bulk_revoked_certificate_can_still_be_challenged_and_re_revoked() {
 }
 
 #[test]
-#[should_panic(expected = "unauthorized: bulk_revoke_course_certificates")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_bulk_revoke_unauthorized_caller_rejected() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -10511,7 +10508,7 @@ fn test_bulk_revoke_unauthorized_caller_rejected() {
 }
 
 #[test]
-#[should_panic(expected = "course not found")]
+#[should_panic(expected = "Error(Contract, #7)")]
 fn test_bulk_revoke_unknown_course_rejected() {
     let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -10521,7 +10518,7 @@ fn test_bulk_revoke_unknown_course_rejected() {
 }
 
 #[test]
-#[should_panic(expected = "no certificates issued for this course")]
+#[should_panic(expected = "Error(Contract, #44)")]
 fn test_bulk_revoke_course_without_certificates_rejected() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -10567,7 +10564,7 @@ fn test_get_course_certificates_empty_for_course_without_issuance() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "withdraw_tokens: amount must be greater than zero")]
+#[should_panic(expected = "Error(Contract, #40)")]
 fn test_withdraw_tokens_rejects_zero_amount() {
     let (env, contract_id, token_id, admin, sec_admin, _treasury, _instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -10581,7 +10578,7 @@ fn test_withdraw_tokens_rejects_zero_amount() {
 }
 
 #[test]
-#[should_panic(expected = "withdraw_tokens: amount must be greater than zero")]
+#[should_panic(expected = "Error(Contract, #40)")]
 fn test_withdraw_tokens_rejects_negative_amount() {
     let (env, contract_id, token_id, admin, sec_admin, _treasury, _instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -10619,7 +10616,7 @@ fn test_withdraw_tokens_accepts_positive_amount() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "update_default_fee: new fee is identical to the current fee")]
+#[should_panic(expected = "Error(Contract, #5)")]
 fn test_update_default_fee_rejects_same_value() {
     let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -10640,7 +10637,7 @@ fn test_update_default_fee_accepts_different_value() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "transfer_admin: cooldown active")]
+#[should_panic(expected = "Error(Contract, #4)")]
 fn test_transfer_admin_cooldown_blocks_rapid_rotation() {
     let (env, contract_id, _token_id, admin, sec_admin, _treasury, _instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -10684,7 +10681,7 @@ fn test_transfer_admin_first_call_never_blocked() {
 // ============================================================
 
 #[test]
-#[should_panic(expected = "course auto-paused after")]
+#[should_panic(expected = "Error(Contract, #36)")]
 fn test_circuit_breaker_trips_after_threshold_failures() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -10793,7 +10790,7 @@ fn test_circuit_breaker_course_can_be_unpaused_by_instructor() {
 // =============================================================================
 
 #[test]
-#[should_panic(expected = "content_hash cannot be all zero bytes")]
+#[should_panic(expected = "Error(Contract, #11)")]
 fn test_register_course_rejects_zero_content_hash() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -10851,7 +10848,7 @@ fn test_withdraw_tokens_requires_both_admins() {
 }
 
 #[test]
-#[should_panic(expected = "unauthorized: requires both admin signatures")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_withdraw_tokens_rejects_single_admin() {
     let (env, contract_id, token_id, admin, sec_admin, _treasury, _instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -11102,7 +11099,7 @@ fn setup_arbitration(
     course_id: &str,
     fee_per_case: i128,
 ) -> Address {
-    client.set_arbitration_fee_config(admin, &fee_per_case);
+    client.set_arbitration_fee_config(admin, token_id, &fee_per_case);
     register_and_approve_course(
         env,
         client,
@@ -11161,7 +11158,7 @@ fn test_escalation_creates_retrievable_arbitration_case() {
 
 /// #257 — a second escalation for the same (student, course_id) must be rejected.
 #[test]
-#[should_panic(expected = "arbitration case already open for this dispute")]
+#[should_panic(expected = "Error(Contract, #47)")]
 fn test_duplicate_escalation_rejected() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -11254,6 +11251,116 @@ fn test_resolve_arbitration_payout_to_instructor() {
     assert_eq!(case.status, DisputeStatus::ResolvedForInstructor);
 }
 
+/// #466 — arbitration fees are configured independently per token.
+#[test]
+fn test_arbitration_fee_config_is_per_token() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let second_token_admin = Address::generate(&env);
+    let second_token_id = env
+        .register_stellar_asset_contract_v2(second_token_admin)
+        .address();
+    client.add_approved_token(&admin, &second_token_id);
+
+    client.set_arbitration_fee_config(&admin, &token_id, &5_000_000);
+    client.set_arbitration_fee_config(&admin, &second_token_id, &250_000);
+
+    assert_eq!(
+        client.get_arbitration_fee_config(&token_id).fee_per_case,
+        5_000_000
+    );
+    assert_eq!(
+        client
+            .get_arbitration_fee_config(&second_token_id)
+            .fee_per_case,
+        250_000
+    );
+}
+
+/// #467 — arbitration fees are tracked in a per-token reserve and released
+/// when the case is resolved.
+#[test]
+fn test_arbitration_fees_held_tracked_per_token() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let fee_per_case = 5_000_000i128;
+    let student = setup_arbitration(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-ARB-HELD",
+        fee_per_case,
+    );
+    let course_id = String::from_str(&env, "COURSE-ARB-HELD");
+
+    assert_eq!(client.get_arbitration_fees_held(&token_id), 0);
+
+    client.escalate_to_arbitration(&student, &course_id);
+    assert_eq!(client.get_arbitration_fees_held(&token_id), fee_per_case);
+
+    env.mock_all_auths_allowing_non_root_auth();
+    client.resolve_arbitration(&admin, &student, &course_id, &true);
+    assert_eq!(
+        client.get_arbitration_fees_held(&token_id),
+        0,
+        "resolving a case must release its reserved fee"
+    );
+}
+
+/// #467 — emergency sweeps must leave arbitration fees reserved for open cases.
+#[test]
+fn test_withdraw_tokens_preserves_arbitration_fees() {
+    let (env, contract_id, token_id, admin, sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let fee_per_case = 5_000_000i128;
+    let student = setup_arbitration(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-ARB-RESERVE",
+        fee_per_case,
+    );
+    let course_id = String::from_str(&env, "COURSE-ARB-RESERVE");
+    client.escalate_to_arbitration(&student, &course_id);
+
+    let token_client = token::Client::new(&env, &token_id);
+    let contract_balance = token_client.balance(&contract_id);
+    let held = client.get_arbitration_fees_held(&token_id);
+    assert_eq!(held, fee_per_case);
+
+    let destination = Address::generate(&env);
+    let over_sweep = client.try_withdraw_tokens(
+        &admin,
+        &sec_admin,
+        &token_id,
+        &contract_balance,
+        &destination,
+    );
+    assert!(
+        over_sweep.is_err(),
+        "emergency sweep must not touch reserved arbitration fees"
+    );
+
+    client.withdraw_tokens(
+        &admin,
+        &sec_admin,
+        &token_id,
+        &(contract_balance - held),
+        &destination,
+    );
+
+    assert_eq!(token_client.balance(&destination), contract_balance - held);
+    assert_eq!(token_client.balance(&contract_id), held);
+    assert_eq!(client.get_arbitration_fees_held(&token_id), held);
+}
+
 // ============================================================
 // REFUND ENROLLMENT ARCHIVAL  (#254)
 // ============================================================
@@ -11290,7 +11397,7 @@ fn test_process_refund_archives_enrollment_to_history() {
     // Request and approve the refund.
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     // The active enrollment must no longer exist.
     assert!(
@@ -11322,7 +11429,7 @@ fn test_process_refund_archives_enrollment_to_history() {
 }
 
 #[test]
-#[should_panic(expected = "enrollment has not started for this course")]
+#[should_panic(expected = "Error(Contract, #34)")]
 fn test_re_enroll_rejects_before_enrollment_start_ledger() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -11346,7 +11453,7 @@ fn test_re_enroll_rejects_before_enrollment_start_ledger() {
         &admin,
         &student,
         &course_id,
-        &Some(String::from_str(&env, "evidence")),
+        &Some(evidence_hash(&env, "evidence")),
     );
 
     // Instructor sets the enrollment start ledger in the future
@@ -11381,7 +11488,7 @@ fn test_re_enroll_succeeds_at_enrollment_start_ledger() {
         &admin,
         &student,
         &course_id,
-        &Some(String::from_str(&env, "evidence")),
+        &Some(evidence_hash(&env, "evidence")),
     );
 
     let enrollment_start = env.ledger().sequence() + 10;
