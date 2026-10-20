@@ -1700,6 +1700,15 @@ impl HamplardContract {
                                 .set(&DataKey::TotalActiveEnrollments, &(total_active - 1));
                         }
 
+                        Self::emit_refund_issued(
+                            &env,
+                            &course_id,
+                            &student,
+                            platform_amount + instructor_amount,
+                            platform_amount,
+                            instructor_amount,
+                        );
+
                         Self::promote_from_waitlist(&env, &course_id);
                     }
                 }
@@ -2948,13 +2957,13 @@ impl HamplardContract {
         if course.status != CourseStatus::Active {
             panic!("course is not available for enrollment");
         }
-        
+
         if let Some(start) = course.enrollment_start_ledger {
             if env.ledger().sequence() < start {
                 panic!("enrollment has not started for this course");
             }
         }
-            
+
         if !env
             .storage()
             .instance()
@@ -3037,7 +3046,12 @@ impl HamplardContract {
                 .unwrap_or_else(|| panic!("balance overflow during transfer verification"));
 
             if actual_received != course.price {
-                Self::emit_enrollment_failed(&env, &student, &course_id, "TRANSFER_AMOUNT_MISMATCH");
+                Self::emit_enrollment_failed(
+                    &env,
+                    &student,
+                    &course_id,
+                    "TRANSFER_AMOUNT_MISMATCH",
+                );
                 return;
             }
 
@@ -3361,6 +3375,98 @@ impl HamplardContract {
         env.events().publish(
             (Symbol::new(&env, "course_completed"), course_id.clone()),
             (student, admin, completion_ledger),
+        );
+    }
+
+    /// Permissionlessly clean up an expired, never-completed enrollment.
+    ///
+    /// The expired enrollment is archived to `EnrollmentHistory`, then removed
+    /// from active storage. `course.active_enrollments` and the platform-wide
+    /// `TotalActiveEnrollments` counter are each decremented exactly once; a
+    /// second call fails because the active enrollment no longer exists.
+    ///
+    /// Refunds are explicitly out of scope: this function only releases the
+    /// active-enrollment counters.
+    pub fn expire_enrollment(env: Env, student: Address, course_id: String) {
+        env.storage()
+            .instance()
+            .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
+
+        let mut course = Self::get_course_internal(&env, &course_id)
+            .unwrap_or_else(|| panic!("course not found"));
+        if course.status == CourseStatus::Archived {
+            panic!("course is archived");
+        }
+        let enrollment_key = DataKey::Enrollment(student.clone(), course_id.clone());
+        let enrollment = env
+            .storage()
+            .persistent()
+            .get::<DataKey, Enrollment>(&enrollment_key)
+            .unwrap_or_else(|| panic!("enrollment not found"));
+
+        if enrollment.completed {
+            panic!("completed enrollment cannot expire");
+        }
+        if enrollment.is_refunded {
+            panic!("refunded enrollment cannot expire");
+        }
+
+        let expiry_ledgers = course
+            .enrollment_expiry_ledgers
+            .unwrap_or_else(|| panic!("course has no enrollment expiry"));
+        let expiry_at = enrollment
+            .enrolled_at_ledger
+            .checked_add(expiry_ledgers)
+            .unwrap_or(u32::MAX);
+        if env.ledger().sequence() < expiry_at {
+            panic!("enrollment has not expired");
+        }
+
+        // Preserve an audit trail before removing the active record.
+        let history_key = DataKey::EnrollmentHistory(student.clone(), course_id.clone());
+        let mut history: Vec<Enrollment> = env
+            .storage()
+            .persistent()
+            .get(&history_key)
+            .unwrap_or_else(|| Vec::new(&env));
+        history.push_back(enrollment);
+        env.storage().persistent().set(&history_key, &history);
+        env.storage().persistent().extend_ttl(
+            &history_key,
+            Self::PERSISTENT_TTL_THRESHOLD,
+            Self::PERSISTENT_TTL_EXTEND_TO,
+        );
+
+        env.storage().persistent().remove(&enrollment_key);
+
+        if course.active_enrollments > 0 {
+            course.active_enrollments -= 1;
+        }
+        course.last_updated_ledger = env.ledger().sequence();
+        env.storage()
+            .persistent()
+            .set(&DataKey::Course(course_id.clone()), &course);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Course(course_id.clone()),
+            Self::PERSISTENT_TTL_THRESHOLD,
+            Self::PERSISTENT_TTL_EXTEND_TO,
+        );
+
+        let total_active: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalActiveEnrollments)
+            .unwrap_or(0);
+        if total_active > 0 {
+            env.storage()
+                .instance()
+                .set(&DataKey::TotalActiveEnrollments, &(total_active - 1));
+        }
+
+        let expired_at_ledger = env.ledger().sequence();
+        env.events().publish(
+            (Symbol::new(&env, "enrollment_expired"), course_id.clone()),
+            (student, course_id, expired_at_ledger),
         );
     }
 
@@ -4755,6 +4861,15 @@ impl HamplardContract {
                     .set(&DataKey::TotalActiveEnrollments, &(total_active - 1));
             }
 
+            Self::emit_refund_issued(
+                &env,
+                &course_id,
+                &student,
+                actual_refund_amount,
+                platform_refund,
+                instructor_refund,
+            );
+
             request.status = RefundStatus::Approved;
             request.refund_amount = Some(actual_refund_amount);
         } else {
@@ -5243,6 +5358,29 @@ impl HamplardContract {
     // ----------------------------------------------------------
     // INTERNAL HELPERS
     // ----------------------------------------------------------
+
+    /// Emit the shared per-student refund event used by both
+    /// `process_refund()` and `archive_course()`.
+    fn emit_refund_issued(
+        env: &Env,
+        course_id: &String,
+        student: &Address,
+        amount: i128,
+        platform_amount: i128,
+        instructor_amount: i128,
+    ) {
+        env.events().publish(
+            (Symbol::new(env, "refund_issued"), course_id.clone()),
+            (
+                student.clone(),
+                course_id.clone(),
+                amount,
+                platform_amount,
+                instructor_amount,
+                env.ledger().sequence(),
+            ),
+        );
+    }
 
     fn get_course_internal(env: &Env, course_id: &String) -> Option<Course> {
         if let Some(course) = env

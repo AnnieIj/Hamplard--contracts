@@ -205,6 +205,7 @@ Initialises the contract. Called once by the deployer.
 | Function | Caller | Description |
 |---|---|---|
 | `enroll(student, course_id)` | Student | Pay and enroll. Splits payment instantly. |
+| `expire_enrollment(student, course_id)` | Anyone | Removes an expired, never-completed enrollment, releases active counters, and emits `enrollment_expired`. No refund is issued. |
 
 ### Completion & Certificates
 
@@ -286,6 +287,8 @@ Returns `true` if the certificate exists and has not been revoked. The `get_cert
 | `course_unpaused` | `course_id` | Course unpaused |
 | `course_archived` | `course_id` | Course archived |
 | `student_enrolled` | `(course_id, student, amount_paid)` | Student enrolls and pays |
+| `enrollment_expired` | `(student, course_id, ledger)` | Expired enrollment cleaned up |
+| `refund_issued` | `(student, course_id, amount, platform_amount, instructor_amount, ledger)` | Refund processed or issued during archive |
 | `course_completed` | `(course_id, student)` | Completion marked by admin |
 | `certificate_issued` | `(certificate_id, student, course_id)` | Certificate issued |
 | `certificate_revoked` | `certificate_id` | Certificate revoked |
