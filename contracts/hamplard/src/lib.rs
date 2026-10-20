@@ -26,6 +26,7 @@
 //! - `update_default_fee` / `update_max_courses_limit` — updates global parameters
 //! - `block_student` / `unblock_student` — bans or unbans a student from the platform
 //! - `get_platform_fee` — retrieves platform fee configuration (admin only)
+//! - `get_treasury` / `get_pending_treasury` — public views of the effective treasury and any scheduled update
 //! - `update_content_hash` — updates the content commitment hash for a course (admin or instructor)
 //!
 //! ## Privileged Operations (multi-sig — both Admin + Secondary Admin required)
@@ -2948,13 +2949,13 @@ impl HamplardContract {
         if course.status != CourseStatus::Active {
             panic!("course is not available for enrollment");
         }
-        
+
         if let Some(start) = course.enrollment_start_ledger {
             if env.ledger().sequence() < start {
                 panic!("enrollment has not started for this course");
             }
         }
-            
+
         if !env
             .storage()
             .instance()
@@ -3037,7 +3038,12 @@ impl HamplardContract {
                 .unwrap_or_else(|| panic!("balance overflow during transfer verification"));
 
             if actual_received != course.price {
-                Self::emit_enrollment_failed(&env, &student, &course_id, "TRANSFER_AMOUNT_MISMATCH");
+                Self::emit_enrollment_failed(
+                    &env,
+                    &student,
+                    &course_id,
+                    "TRANSFER_AMOUNT_MISMATCH",
+                );
                 return;
             }
 
@@ -4080,6 +4086,40 @@ impl HamplardContract {
                 effective_ledger,
             ),
         );
+    }
+
+    /// Get the effective platform treasury, i.e. where fees go right now.
+    ///
+    /// A scheduled `update_treasury` takes effect once the ledger reaches its
+    /// `effective_ledger`, so this returns the pending address from that
+    /// ledger onward. Read-only: unlike `enroll`, it never writes the
+    /// promotion back to storage.
+    pub fn get_treasury(env: Env) -> Address {
+        if let Some(pending) = env
+            .storage()
+            .instance()
+            .get::<DataKey, TreasuryUpdate>(&DataKey::PendingTreasury)
+        {
+            if env.ledger().sequence() >= pending.effective_ledger {
+                return pending.address;
+            }
+        }
+        env.storage()
+            .instance()
+            .get(&DataKey::Treasury)
+            .unwrap_or_else(|| panic!("treasury not set"))
+    }
+
+    /// Get the scheduled treasury update that has not yet taken effect.
+    ///
+    /// Returns `None` when no update is scheduled, or once its
+    /// `effective_ledger` has been reached (it is then the effective
+    /// treasury; see `get_treasury`).
+    pub fn get_pending_treasury(env: Env) -> Option<TreasuryUpdate> {
+        env.storage()
+            .instance()
+            .get::<DataKey, TreasuryUpdate>(&DataKey::PendingTreasury)
+            .filter(|p| env.ledger().sequence() < p.effective_ledger)
     }
 
     /// Update the default platform fee percentage.
