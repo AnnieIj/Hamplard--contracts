@@ -9507,6 +9507,16 @@ fn test_fee_preview_matches_actual_enroll_deduction() {
 }
 
 #[test]
+#[should_panic(expected = "payment_amount cannot be negative")]
+fn test_get_effective_fee_for_payment_rejects_negative_amount() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let student = Address::generate(&env);
+
+    client.get_effective_fee_for_payment(&student, &token_id, &-1_000_000_000i128);
+}
+
+#[test]
 fn test_issue_certificate_with_uuid_enrollment_reference() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
