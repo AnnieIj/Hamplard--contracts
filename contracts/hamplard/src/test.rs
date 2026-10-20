@@ -101,7 +101,6 @@ fn evidence_hash(env: &Env, value: &str) -> BytesN<32> {
     BytesN::from_array(env, &bytes)
 }
 
-
 fn get_enrollment_ref(
     env: &Env,
     client: &HamplardContractClient,
@@ -1823,7 +1822,6 @@ fn test_archive_course_rejects_oversized_refund_list() {
 }
 
 #[test]
-#[should_panic]
 fn test_enroll_insufficient_funds_rollback() {
     let (env, contract_id, token_id, admin, sec_admin, treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -1845,12 +1843,14 @@ fn test_enroll_insufficient_funds_rollback() {
     // Student has enough for platform fee (100_000_000) but not the full course price
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &150_000_000);
 
-    // Enroll should panic because instructor transfer will fail
+    // Enrollment exits cleanly when the token transfer fails.
     client.enroll(&student, &course_id);
 
-    // Verify treasury didn't receive any tokens (rollback proof)
+    // Verify no funds moved and no enrollment state was written.
     assert_eq!(token_client.balance(&treasury), 0);
     assert_eq!(token_client.balance(&student), 150_000_000);
+    assert_eq!(token_client.balance(&contract_id), 0);
+    assert!(!client.is_enrolled(&student, &course_id));
 }
 
 #[test]
@@ -2552,7 +2552,7 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
     client.request_refund(&refund_student, &refund_course_id);
 
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.process_refund(&admin, &refund_student, &refund_course_id, &true);
+        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
     }));
     assert!(res.is_err(), "old admin must be rejected by process_refund");
 
@@ -3071,9 +3071,7 @@ fn test_unpause_platform_rejects_double_unpause() {
 /// Read the remaining instance TTL of the contract.
 fn instance_ttl(env: &Env, contract_id: &Address) -> u32 {
     use soroban_sdk::testutils::storage::Instance as _;
-    env.as_contract(contract_id, || {
-        env.storage().instance().get_ttl()
-    })
+    env.as_contract(contract_id, || env.storage().instance().get_ttl())
 }
 
 #[test]
@@ -3085,9 +3083,7 @@ fn test_pause_platform_extends_instance_ttl() {
         l.sequence_number += 400_000;
     });
 
-    assert!(
-        instance_ttl(&env, &contract_id) < HamplardContract::INSTANCE_TTL_THRESHOLD
-    );
+    assert!(instance_ttl(&env, &contract_id) < HamplardContract::INSTANCE_TTL_THRESHOLD);
 
     client.pause_platform(&admin);
 
@@ -3108,9 +3104,7 @@ fn test_unpause_platform_extends_instance_ttl() {
         l.sequence_number += 400_000;
     });
 
-    assert!(
-        instance_ttl(&env, &contract_id) < HamplardContract::INSTANCE_TTL_THRESHOLD
-    );
+    assert!(instance_ttl(&env, &contract_id) < HamplardContract::INSTANCE_TTL_THRESHOLD);
 
     client.unpause_platform(&admin);
 
@@ -4737,7 +4731,7 @@ fn test_refund_lifecycle() {
     // Approve refund
     let initial_balance = token::Client::new(&env, &token_id).balance(&student);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     let final_balance = token::Client::new(&env, &token_id).balance(&student);
     assert_eq!(final_balance - initial_balance, 1_000_000_000);
@@ -4802,7 +4796,7 @@ fn test_refund_rejection() {
 
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &false);
+    client.process_refund(&admin, &student, &course_id, &false, &None);
 
     let request = client.get_refund_request(&student, &course_id).unwrap();
     assert_eq!(request.status, RefundStatus::Rejected);
@@ -5420,7 +5414,7 @@ fn test_process_refund_event_includes_admin() {
     client.enroll(&student, &course_id);
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     let (event_student, event_course_id, event_approved, event_admin): (
         Address,
@@ -7548,6 +7542,7 @@ fn test_platform_counter_decrements_on_refund() {
         &student1,
         &String::from_str(&env, "COURSE-001"),
         &true,
+        &None,
     );
 
     // Counter should decrement
@@ -9577,7 +9572,9 @@ fn test_mark_completed_accepts_zeroed_evidence_hash() {
     let evidence = Some(BytesN::from_array(&env, &[0u8; 32]));
     client.mark_completed(&admin, &student, &course_id, &evidence);
 
-    let enrollment = client.get_enrollment(&student, &student, &course_id).unwrap();
+    let enrollment = client
+        .get_enrollment(&student, &student, &course_id)
+        .unwrap();
     assert_eq!(enrollment.evidence_hash, evidence);
     assert_eq!(client.has_completed(&student, &course_id), Some(true));
 }
@@ -11290,7 +11287,7 @@ fn test_process_refund_archives_enrollment_to_history() {
     // Request and approve the refund.
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     // The active enrollment must no longer exist.
     assert!(
@@ -11346,7 +11343,7 @@ fn test_re_enroll_rejects_before_enrollment_start_ledger() {
         &admin,
         &student,
         &course_id,
-        &Some(String::from_str(&env, "evidence")),
+        &Some(evidence_hash(&env, "evidence")),
     );
 
     // Instructor sets the enrollment start ledger in the future
@@ -11381,7 +11378,7 @@ fn test_re_enroll_succeeds_at_enrollment_start_ledger() {
         &admin,
         &student,
         &course_id,
-        &Some(String::from_str(&env, "evidence")),
+        &Some(evidence_hash(&env, "evidence")),
     );
 
     let enrollment_start = env.ledger().sequence() + 10;
@@ -11397,4 +11394,138 @@ fn test_re_enroll_succeeds_at_enrollment_start_ledger() {
         .unwrap();
     assert!(!enrollment.completed);
     assert_eq!(enrollment.enrolled_at_ledger, enrollment_start);
+}
+
+// ============================================================
+// CPU / MEMORY BASELINE BENCHMARKS (#493)
+// ============================================================
+
+fn print_budget(env: &Env, label: &str) {
+    let budget = env.cost_estimate().budget();
+    std::println!(
+        "BENCH {} cpu_instructions={} memory_bytes={}",
+        label,
+        budget.cpu_instruction_cost(),
+        budget.memory_bytes_cost()
+    );
+}
+
+#[test]
+#[ignore = "benchmark; run with --ignored --nocapture"]
+fn benchmark_enroll_single_course() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "BENCH-ENROLL",
+        100_000_000,
+    );
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &1_000_000_000);
+
+    client.enroll(&student, &String::from_str(&env, "BENCH-ENROLL"));
+
+    print_budget(&env, "enroll");
+}
+
+#[test]
+#[ignore = "benchmark; run with --ignored --nocapture"]
+fn benchmark_batch_enroll_10_courses() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let mut course_ids = Vec::new(&env);
+    for i in 0..10u32 {
+        let course_id = std::format!("BENCH-BATCH-{:02}", i);
+        register_and_approve_course(
+            &env,
+            &client,
+            &token_id,
+            &admin,
+            &instructor,
+            &course_id,
+            100_000_000,
+        );
+        course_ids.push_back(String::from_str(&env, &course_id));
+    }
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &10_000_000_000);
+
+    client.batch_enroll(&student, &course_ids);
+
+    print_budget(&env, "batch_enroll_10");
+}
+
+#[test]
+#[ignore = "benchmark; run with --ignored --nocapture"]
+fn benchmark_archive_course_with_10_refunds() {
+    let (env, contract_id, token_id, admin, sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "BENCH-ARCHIVE",
+        100_000_000,
+    );
+    let course_id = String::from_str(&env, "BENCH-ARCHIVE");
+
+    let mut students = Vec::new(&env);
+    let asset_client = token::StellarAssetClient::new(&env, &token_id);
+    for _ in 0..10u32 {
+        let student = Address::generate(&env);
+        asset_client.mint(&student, &1_000_000_000);
+        client.enroll(&student, &course_id);
+        students.push_back(student);
+    }
+
+    client.pause_course(&admin, &course_id);
+    env.mock_all_auths_allowing_non_root_auth();
+    client.archive_course(&admin, &sec_admin, &course_id, &Some(students));
+
+    print_budget(&env, "archive_course_10_refunds");
+}
+
+#[test]
+#[ignore = "benchmark; run with --ignored --nocapture"]
+fn benchmark_register_course_against_50_course_catalog() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    client.update_max_courses_limit(&admin, &60u32);
+    for i in 0..50u32 {
+        let course_id = std::format!("BENCH-CATALOG-{:02}", i);
+        client.register_course(
+            &instructor,
+            &String::from_str(&env, &course_id),
+            &100_000_000,
+            &token_id,
+            &0u32,
+            &None,
+            &BytesN::from_array(&env, &[1u8; 32]),
+            &soroban_sdk::Vec::new(&env),
+        );
+    }
+
+    client.register_course(
+        &instructor,
+        &String::from_str(&env, "BENCH-CATALOG-50"),
+        &100_000_000,
+        &token_id,
+        &0u32,
+        &None,
+        &BytesN::from_array(&env, &[1u8; 32]),
+        &soroban_sdk::Vec::new(&env),
+    );
+
+    print_budget(&env, "register_course_catalog_50");
 }

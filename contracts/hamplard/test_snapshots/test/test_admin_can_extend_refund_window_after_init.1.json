@@ -1279,6 +1279,12 @@
                     },
                     {
                       "key": {
+                        "symbol": "refund_amount"
+                      },
+                      "val": "void"
+                    },
+                    {
+                      "key": {
                         "symbol": "requested_at_ledger"
                       },
                       "val": {

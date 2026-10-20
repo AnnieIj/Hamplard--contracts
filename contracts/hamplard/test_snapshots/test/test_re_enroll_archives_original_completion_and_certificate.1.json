@@ -261,7 +261,7 @@
                   "string": "COURSE-REENROLL-002"
                 },
                 {
-                  "string": "evidence_original"
+                  "bytes": "65766964656e63655f6f726967696e616c000000000000000000000000000000"
                 }
               ]
             }
@@ -1457,7 +1457,7 @@
                             "symbol": "evidence_hash"
                           },
                           "val": {
-                            "string": "evidence_original"
+                            "bytes": "65766964656e63655f6f726967696e616c000000000000000000000000000000"
                           }
                         },
                         {
