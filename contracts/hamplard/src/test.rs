@@ -4377,6 +4377,118 @@ fn test_refund_rejection() {
 }
 
 #[test]
+fn test_cancel_refund_request() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-CANCEL",
+        1_000_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-CANCEL");
+
+    client.enroll(&student, &course_id);
+    client.request_refund(&student, &course_id);
+
+    client.cancel_refund_request(&student, &course_id);
+    let request = client.get_refund_request(&student, &course_id).unwrap();
+    assert_eq!(request.status, RefundStatus::Cancelled);
+
+    // A cancelled request frees the slot for a fresh request in-window.
+    client.request_refund(&student, &course_id);
+    let fresh = client.get_refund_request(&student, &course_id).unwrap();
+    assert_eq!(fresh.status, RefundStatus::Pending);
+
+    // Cancelling again also clears completion.
+    client.cancel_refund_request(&student, &course_id);
+    client.mark_completed(
+        &admin,
+        &student,
+        &course_id,
+        &Some(String::from_str(&env, "evidence")),
+    );
+    assert_eq!(client.has_completed(&student, &course_id), Some(true));
+}
+
+#[test]
+#[should_panic(expected = "cannot mark completed while refund request is pending")]
+fn test_completion_blocked_while_refund_pending() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-PENDING-BLOCK",
+        1_000_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-PENDING-BLOCK");
+
+    client.enroll(&student, &course_id);
+    client.request_refund(&student, &course_id);
+
+    client.mark_completed(
+        &admin,
+        &student,
+        &course_id,
+        &Some(String::from_str(&env, "evidence")),
+    );
+}
+
+#[test]
+#[should_panic(expected = "unauthorized")]
+fn test_cancel_refund_request_unauthorized_caller_rejected() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-CANCEL-UNAUTH",
+        1_000_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-CANCEL-UNAUTH");
+
+    client.enroll(&student, &course_id);
+    client.request_refund(&student, &course_id);
+
+    // A third party signs for themselves only, then tries to cancel the
+    // student's request — the contract demands the student's auth.
+    let attacker = Address::generate(&env);
+    client
+        .mock_auths(&[MockAuth {
+            address: &attacker,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "cancel_refund_request",
+                args: (student.clone(), course_id.clone()).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .cancel_refund_request(&student, &course_id);
+}
+
+#[test]
 #[should_panic(expected = "instructor is frozen")]
 fn test_frozen_instructor_enrollment_blocked() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
@@ -10831,4 +10943,190 @@ fn test_process_refund_archives_enrollment_to_history() {
     );
     assert_eq!(archived.student, student);
     assert_eq!(archived.course_id, course_id);
+}
+
+// ============================================================
+// REFUND PROCESSING DEADLINE — student self-approval past deadline
+// ============================================================
+
+/// The processing deadline must be captured on the request at creation
+/// time, so the struct exposes a deterministic `deadline_ledger` the
+/// student can rely on.
+#[test]
+fn test_refund_request_records_deadline_ledger() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+
+    client.set_refund_processing_deadline(&admin, &100u32);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-DEADLINE",
+        1_000_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-DEADLINE");
+
+    client.enroll(&student, &course_id);
+    client.request_refund(&student, &course_id);
+
+    let request = client.get_refund_request(&student, &course_id).unwrap();
+    assert_eq!(request.status, RefundStatus::Pending);
+    assert_eq!(
+        request.deadline_ledger,
+        request.requested_at_ledger + 100,
+        "deadline_ledger must equal requested_at_ledger + configured deadline",
+    );
+}
+
+/// Once the deadline elapses the student can resolve the request without
+/// the admin: the full payment is returned, the enrollment is removed, and
+/// the request is marked Approved.
+#[test]
+fn test_claim_refund_after_deadline_succeeds() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+
+    // Smallest legal deadline so we can step past it quickly.
+    client.set_refund_processing_deadline(&admin, &10u32);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-CLAIM",
+        1_000_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-CLAIM");
+
+    client.enroll(&student, &course_id);
+    client.request_refund(&student, &course_id);
+
+    // Advance past the snapshotted deadline (requested_at + 10).
+    env.ledger().with_mut(|l| {
+        l.sequence_number += 11;
+    });
+
+    let initial_balance = token::Client::new(&env, &token_id).balance(&student);
+    env.mock_all_auths_allowing_non_root_auth();
+    client.claim_refund(&student, &course_id);
+
+    let final_balance = token::Client::new(&env, &token_id).balance(&student);
+    assert_eq!(final_balance - initial_balance, 1_000_000_000);
+    assert!(!client.is_enrolled(&student, &course_id));
+
+    let request = client.get_refund_request(&student, &course_id).unwrap();
+    assert_eq!(request.status, RefundStatus::Approved);
+}
+
+/// Before the deadline elapses the student cannot self-approve — the admin
+/// still has its window to act.
+#[test]
+#[should_panic(expected = "deadline has not elapsed")]
+fn test_claim_refund_before_deadline_rejected() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+
+    client.set_refund_processing_deadline(&admin, &100u32);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-CLAIM-EARLY",
+        1_000_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-CLAIM-EARLY");
+
+    client.enroll(&student, &course_id);
+    client.request_refund(&student, &course_id);
+
+    // Only partway toward the deadline.
+    env.ledger().with_mut(|l| {
+        l.sequence_number += 5;
+    });
+
+    client.claim_refund(&student, &course_id);
+}
+
+/// A request the admin already resolved cannot be claimed again — not by
+/// the student, not even past the deadline.
+#[test]
+#[should_panic(expected = "refund request is not pending")]
+fn test_claim_refund_on_already_resolved_rejected() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+
+    client.set_refund_processing_deadline(&admin, &10u32);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-CLAIM-DONE",
+        1_000_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-CLAIM-DONE");
+
+    client.enroll(&student, &course_id);
+    client.request_refund(&student, &course_id);
+
+    // Admin resolves first.
+    env.mock_all_auths_allowing_non_root_auth();
+    client.process_refund(&admin, &student, &course_id, &true);
+
+    // Well past the deadline — still must not be re-resolvable.
+    env.ledger().with_mut(|l| {
+        l.sequence_number += 100;
+    });
+    client.claim_refund(&student, &course_id);
+}
+
+/// The deadline parameter is admin-configurable within bounds. Values
+/// below the minimum are rejected.
+#[test]
+#[should_panic(expected = "out of bounds")]
+fn test_set_refund_processing_deadline_below_min_rejected() {
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    client.set_refund_processing_deadline(&admin, &9u32);
+}
+
+/// Values above the maximum are rejected.
+#[test]
+#[should_panic(expected = "out of bounds")]
+fn test_set_refund_processing_deadline_above_max_rejected() {
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    client.set_refund_processing_deadline(&admin, &1_000_001u32);
+}
+
+/// When the admin has not configured a deadline, the default applies and
+/// is exposed through the getter.
+#[test]
+fn test_refund_processing_deadline_defaults_when_unset() {
+    let (env, contract_id, _token_id, _admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    assert_eq!(client.get_refund_processing_deadline(), 17_280u32);
 }

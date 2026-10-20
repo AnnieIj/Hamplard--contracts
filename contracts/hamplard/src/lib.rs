@@ -420,6 +420,9 @@ pub enum RefundStatus {
     Pending,
     Approved,
     Rejected,
+    /// Withdrawn by the student before any admin decision. A cancelled
+    /// request no longer blocks completion or a fresh request in-window.
+    Cancelled,
 }
 
 /// A refund request record
@@ -429,6 +432,12 @@ pub struct RefundRequest {
     pub student: Address,
     pub course_id: String,
     pub requested_at_ledger: u32,
+    /// Ledger sequence by which an admin must process this request.
+    /// After it elapses the student may self-approve the refund via
+    /// `claim_refund` without admin action. Snapshotted at request time
+    /// as `requested_at_ledger + refund_processing_deadline`, so later
+    /// config changes do not affect requests already pending.
+    pub deadline_ledger: u32,
     pub status: RefundStatus,
 }
 
@@ -501,6 +510,10 @@ pub enum DataKey {
     DefaultMinCompletionLedgers,
     /// Refund window delay in ledger sequences
     RefundWindow,
+    /// Admin-configurable processing deadline (in ledger sequences) for a
+    /// pending refund request. Once it elapses the student may self-approve
+    /// the refund via `claim_refund` without admin action.
+    RefundProcessingDeadline,
     /// Refund request record by (student_address, course_id)
     RefundRequest(Address, String),
     /// Blocklist of instructor addresses who are frozen
@@ -636,6 +649,18 @@ impl HamplardContract {
     /// Default revocation challenge period in ledger sequences
     /// (~17,280 ledgers ≈ 1 day at 5s/ledger).
     const DEFAULT_REVOCATION_CHALLENGE_PERIOD: u32 = 17_280;
+
+    /// Default refund processing deadline in ledger sequences
+    /// (~17,280 ledgers ≈ 1 day at 5s/ledger). After this many ledgers
+    /// elapse from a refund request, the student may self-approve it via
+    /// `claim_refund` without admin action.
+    const DEFAULT_REFUND_PROCESSING_DEADLINE: u32 = 17_280;
+    /// Bounds for the admin-configurable refund processing deadline. The
+    /// floor gives the admin a real window to act before a student can
+    /// self-approve; the ceiling stops the feature being silently disabled
+    /// with an absurdly large value.
+    const MIN_REFUND_PROCESSING_DEADLINE: u32 = 10;
+    const MAX_REFUND_PROCESSING_DEADLINE: u32 = 1_000_000;
     /// Maximum number of course IDs allowed in a single `batch_enroll()` call.
     pub(crate) const MAX_BATCH_SIZE: u32 = 50;
     /// Maximum number of course IDs returned by a single `list_courses()` call.
@@ -3177,6 +3202,16 @@ impl HamplardContract {
             panic!("cannot mark refunded enrollment as completed");
         }
 
+        // A pending refund request must be resolved or cancelled first, so a
+        // student cannot complete and then still be refunded for the course.
+        let refund_key = DataKey::RefundRequest(student.clone(), course_id.clone());
+        let pending: Option<RefundRequest> = env.storage().persistent().get(&refund_key);
+        if let Some(request) = pending {
+            if request.status == RefundStatus::Pending {
+                panic!("cannot mark completed while refund request is pending");
+            }
+        }
+
         let elapsed = env
             .ledger()
             .sequence()
@@ -4395,6 +4430,43 @@ impl HamplardContract {
             .unwrap_or(1000)
     }
 
+    /// Configure the refund processing deadline (in ledger sequences).
+    /// After this many ledgers elapse from a refund request, the student
+    /// may self-approve it via `claim_refund` without admin action. Bounded
+    /// to `[MIN_REFUND_PROCESSING_DEADLINE, MAX_REFUND_PROCESSING_DEADLINE]`.
+    pub fn set_refund_processing_deadline(env: Env, admin: Address, ledgers: u32) {
+        admin.require_auth();
+        Self::require_admin(&env, &admin, "set_refund_processing_deadline");
+        if ledgers < Self::MIN_REFUND_PROCESSING_DEADLINE
+            || ledgers > Self::MAX_REFUND_PROCESSING_DEADLINE
+        {
+            panic!("refund processing deadline out of bounds");
+        }
+        env.storage()
+            .instance()
+            .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
+        env.storage()
+            .instance()
+            .set(&DataKey::RefundProcessingDeadline, &ledgers);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "refund_processing_deadline_set"),
+                admin.clone(),
+            ),
+            (admin, ledgers),
+        );
+    }
+
+    /// Get the configured refund processing deadline (in ledger sequences),
+    /// or the default if the admin has not set one.
+    pub fn get_refund_processing_deadline(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::RefundProcessingDeadline)
+            .unwrap_or(Self::DEFAULT_REFUND_PROCESSING_DEADLINE)
+    }
+
     /// Update the revocation challenge period (in ledger sequences).
     /// This is the window during which a certificate holder may dispute
     /// a pending revocation after `revoke_certificate` is called.
@@ -4460,14 +4532,33 @@ impl HamplardContract {
         }
 
         let key = DataKey::RefundRequest(student.clone(), course_id.clone());
-        if env.storage().persistent().has(&key) {
-            panic!("refund request already exists");
+        if let Some(existing) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, RefundRequest>(&key)
+        {
+            // A cancelled request frees the slot for a fresh request within
+            // the window; any other prior request still blocks a new one.
+            if existing.status != RefundStatus::Cancelled {
+                panic!("refund request already exists");
+            }
         }
+
+        let now = env.ledger().sequence();
+        let deadline = now
+            .checked_add(
+                env.storage()
+                    .instance()
+                    .get::<DataKey, u32>(&DataKey::RefundProcessingDeadline)
+                    .unwrap_or(Self::DEFAULT_REFUND_PROCESSING_DEADLINE),
+            )
+            .expect("refund deadline overflow");
 
         let request = RefundRequest {
             student: student.clone(),
             course_id: course_id.clone(),
-            requested_at_ledger: env.ledger().sequence(),
+            requested_at_ledger: now,
+            deadline_ledger: deadline,
             status: RefundStatus::Pending,
         };
 
@@ -4481,6 +4572,38 @@ impl HamplardContract {
         env.events().publish(
             (Symbol::new(&env, "refund_requested"), course_id.clone()),
             (student, course_id, enrollment.amount_paid),
+        );
+    }
+
+    /// Let a student withdraw their own pending refund request. Only the
+    /// student who filed the request can call this, and only while the
+    /// request is still `Pending`.
+    pub fn cancel_refund_request(env: Env, student: Address, course_id: String) {
+        student.require_auth();
+        env.storage()
+            .instance()
+            .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
+
+        let key = DataKey::RefundRequest(student.clone(), course_id.clone());
+        let mut request = env
+            .storage()
+            .persistent()
+            .get::<DataKey, RefundRequest>(&key)
+            .unwrap_or_else(|| panic!("refund request not found"));
+
+        if request.status != RefundStatus::Pending {
+            panic!("refund request is not pending");
+        }
+
+        request.status = RefundStatus::Cancelled;
+        env.storage().persistent().set(&key, &request);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "refund_request_cancelled"),
+                course_id.clone(),
+            ),
+            (student, course_id),
         );
     }
 
@@ -4510,101 +4633,145 @@ impl HamplardContract {
         }
 
         if approved {
-            let mut course = Self::get_course_internal(&env, &course_id)
-                .unwrap_or_else(|| panic!("course not found"));
-            let enrollment_key = DataKey::Enrollment(student.clone(), course_id.clone());
-            let mut enrollment = env
-                .storage()
-                .persistent()
-                .get::<DataKey, Enrollment>(&enrollment_key)
-                .unwrap_or_else(|| panic!("enrollment not found"));
-
-            // Use the split actually applied at enroll()/re_enroll() time
-            // (persisted on the enrollment record) rather than recomputing
-            // it from course.platform_fee_percent, which is never consulted
-            // at enrollment and may have since diverged from the FeeConfig
-            // (and any risk surcharge) that deduct_fee() actually applied.
-            let platform_amount = enrollment.platform_amount;
-            let instructor_amount = enrollment.instructor_amount;
-
-            let token_client = token::Client::new(&env, &course.token);
-            let treasury: Address = env
-                .storage()
-                .instance()
-                .get(&DataKey::Treasury)
-                .unwrap_or_else(|| panic!("treasury not set"));
-
-            // Refund platform fee from treasury
-            if platform_amount > 0 {
-                token_client.transfer(&treasury, &student, &platform_amount);
-            }
-
-            // Refund instructor share from contract-held earnings
-            if instructor_amount > 0 {
-                Self::debit_instructor_earnings(
-                    &env,
-                    &course.instructor,
-                    &course.token,
-                    instructor_amount,
-                );
-                token_client.transfer(
-                    &env.current_contract_address(),
-                    &student,
-                    &instructor_amount,
-                );
-            }
-
-            // Archive the refunded enrollment to EnrollmentHistory before
-            // removing the active record, so the refund is auditable on-chain.
-            enrollment.is_refunded = true;
-            let history_key = DataKey::EnrollmentHistory(student.clone(), course_id.clone());
-            let mut history: Vec<Enrollment> = env
-                .storage()
-                .persistent()
-                .get(&history_key)
-                .unwrap_or_else(|| Vec::new(&env));
-            history.push_back(enrollment.clone());
-            env.storage().persistent().set(&history_key, &history);
-            env.storage().persistent().extend_ttl(
-                &history_key,
-                Self::PERSISTENT_TTL_THRESHOLD,
-                Self::PERSISTENT_TTL_EXTEND_TO,
-            );
-            env.storage().persistent().remove(&enrollment_key);
-
-            // Decrement active enrollments
-            if course.active_enrollments > 0 {
-                course.active_enrollments -= 1;
-            }
-
-            course.last_updated_ledger = env.ledger().sequence();
-            env.storage()
-                .persistent()
-                .set(&DataKey::Course(course_id.clone()), &course);
-
-            // Decrement platform-wide active enrollment counter
-            let total_active: u32 = env
-                .storage()
-                .instance()
-                .get(&DataKey::TotalActiveEnrollments)
-                .unwrap_or(0);
-            if total_active > 0 {
-                env.storage()
-                    .instance()
-                    .set(&DataKey::TotalActiveEnrollments, &(total_active - 1));
-            }
-
-            request.status = RefundStatus::Approved;
+            Self::apply_refund_approval(&env, &key, &mut request);
         } else {
             request.status = RefundStatus::Rejected;
+            env.storage().persistent().set(&key, &request);
         }
-
-        env.storage().persistent().set(&key, &request);
 
         env.events().publish(
             (Symbol::new(&env, "refund_processed"), course_id.clone()),
             (student, course_id, approved, admin),
         );
+    }
+
+    /// Let a student self-approve a pending refund once the processing
+    /// deadline recorded on the request has elapsed, removing the need for
+    /// admin action. The deadline is snapshotted at request time, so this
+    /// honours whatever `refund_processing_deadline` was configured then.
+    pub fn claim_refund(env: Env, student: Address, course_id: String) {
+        student.require_auth();
+        env.storage()
+            .instance()
+            .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
+
+        let key = DataKey::RefundRequest(student.clone(), course_id.clone());
+        let mut request = env
+            .storage()
+            .persistent()
+            .get::<DataKey, RefundRequest>(&key)
+            .unwrap_or_else(|| panic!("refund request not found"));
+
+        if request.status != RefundStatus::Pending {
+            panic!("refund request is not pending");
+        }
+
+        if env.ledger().sequence() < request.deadline_ledger {
+            panic!("refund processing deadline has not elapsed");
+        }
+
+        Self::apply_refund_approval(&env, &key, &mut request);
+
+        env.events().publish(
+            (Symbol::new(&env, "refund_claimed"), course_id.clone()),
+            (student, course_id),
+        );
+    }
+
+    /// Refund both payment shares back to the student, archive the
+    /// enrollment to history, decrement the active-enrollment counters,
+    /// and mark the request `Approved`. Shared by the admin `process_refund`
+    /// path and the student `claim_refund` self-approval path so the two
+    /// stay byte-for-byte consistent.
+    fn apply_refund_approval(env: &Env, key: &DataKey, request: &mut RefundRequest) {
+        let mut course = Self::get_course_internal(env, &request.course_id)
+            .unwrap_or_else(|| panic!("course not found"));
+        let enrollment_key =
+            DataKey::Enrollment(request.student.clone(), request.course_id.clone());
+        let mut enrollment = env
+            .storage()
+            .persistent()
+            .get::<DataKey, Enrollment>(&enrollment_key)
+            .unwrap_or_else(|| panic!("enrollment not found"));
+
+        // Use the split actually applied at enroll()/re_enroll() time
+        // (persisted on the enrollment record) rather than recomputing
+        // it from course.platform_fee_percent, which is never consulted
+        // at enrollment and may have since diverged from the FeeConfig
+        // (and any risk surcharge) that deduct_fee() actually applied.
+        let platform_amount = enrollment.platform_amount;
+        let instructor_amount = enrollment.instructor_amount;
+
+        let token_client = token::Client::new(env, &course.token);
+        let treasury: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Treasury)
+            .unwrap_or_else(|| panic!("treasury not set"));
+
+        // Refund platform fee from treasury
+        if platform_amount > 0 {
+            token_client.transfer(&treasury, &request.student, &platform_amount);
+        }
+
+        // Refund instructor share from contract-held earnings
+        if instructor_amount > 0 {
+            Self::debit_instructor_earnings(
+                env,
+                &course.instructor,
+                &course.token,
+                instructor_amount,
+            );
+            token_client.transfer(
+                &env.current_contract_address(),
+                &request.student,
+                &instructor_amount,
+            );
+        }
+
+        // Archive the refunded enrollment to EnrollmentHistory before
+        // removing the active record, so the refund is auditable on-chain.
+        enrollment.is_refunded = true;
+        let history_key =
+            DataKey::EnrollmentHistory(request.student.clone(), request.course_id.clone());
+        let mut history: Vec<Enrollment> = env
+            .storage()
+            .persistent()
+            .get(&history_key)
+            .unwrap_or_else(|| Vec::new(env));
+        history.push_back(enrollment.clone());
+        env.storage().persistent().set(&history_key, &history);
+        env.storage().persistent().extend_ttl(
+            &history_key,
+            Self::PERSISTENT_TTL_THRESHOLD,
+            Self::PERSISTENT_TTL_EXTEND_TO,
+        );
+        env.storage().persistent().remove(&enrollment_key);
+
+        // Decrement active enrollments
+        if course.active_enrollments > 0 {
+            course.active_enrollments -= 1;
+        }
+
+        course.last_updated_ledger = env.ledger().sequence();
+        env.storage()
+            .persistent()
+            .set(&DataKey::Course(request.course_id.clone()), &course);
+
+        // Decrement platform-wide active enrollment counter
+        let total_active: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalActiveEnrollments)
+            .unwrap_or(0);
+        if total_active > 0 {
+            env.storage()
+                .instance()
+                .set(&DataKey::TotalActiveEnrollments, &(total_active - 1));
+        }
+
+        request.status = RefundStatus::Approved;
+        env.storage().persistent().set(&key, &request);
     }
 
     /// Get a refund request record by student and course ID
