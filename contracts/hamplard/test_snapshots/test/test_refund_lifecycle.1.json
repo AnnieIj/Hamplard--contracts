@@ -628,7 +628,7 @@
                         "symbol": "total_enrollments"
                       },
                       "val": {
-                        "u32": 1
+                        "u32": 0
                       }
                     },
                     {

@@ -1726,6 +1726,7 @@ fn test_archive_course_with_refunds() {
     let course = client.get_course(&course_id).unwrap();
     assert_eq!(course.status, CourseStatus::Archived);
     assert_eq!(course.active_enrollments, 0);
+    assert_eq!(course.total_enrollments, 0);
 
     assert!(!client.is_enrolled(&student_a, &course_id));
     assert!(!client.is_enrolled(&student_b, &course_id));
@@ -3975,6 +3976,46 @@ fn test_enroll_beyond_capacity_rejected() {
 }
 
 #[test]
+fn test_refund_releases_capacity_for_new_student() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-CAP-REFUND",
+        100_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-CAP-REFUND");
+    client.update_course(&instructor, &course_id, &None, &Some(Some(1u32)));
+
+    let student_a = Address::generate(&env);
+    let student_b = Address::generate(&env);
+    let asset_client = token::StellarAssetClient::new(&env, &token_id);
+    asset_client.mint(&student_a, &1_000_000_000);
+    asset_client.mint(&student_b, &1_000_000_000);
+
+    client.enroll(&student_a, &course_id);
+    assert_eq!(client.get_course(&course_id).unwrap().total_enrollments, 1);
+
+    client.request_refund(&student_a, &course_id);
+    env.mock_all_auths_allowing_non_root_auth();
+    client.process_refund(&admin, &student_a, &course_id, &true, &None);
+
+    let after_refund = client.get_course(&course_id).unwrap();
+    assert_eq!(after_refund.total_enrollments, 0);
+    assert_eq!(after_refund.active_enrollments, 0);
+
+    client.enroll(&student_b, &course_id);
+    let after_enroll = client.get_course(&course_id).unwrap();
+    assert_eq!(after_enroll.total_enrollments, 1);
+    assert_eq!(after_enroll.active_enrollments, 1);
+}
+
+#[test]
 fn test_enroll_unlimited_capacity() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -5950,6 +5991,29 @@ fn test_mark_completed_after_min_duration_succeeds() {
     );
 
     assert_eq!(client.has_completed(&student, &course_id), Some(true));
+}
+
+#[test]
+fn test_update_min_completion_ledgers_accepts_maximum() {
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    client.update_min_completion_ledgers(&admin, &HamplardContract::MAX_MIN_COMPLETION_LEDGERS);
+
+    assert_eq!(
+        client.get_min_completion_ledgers(),
+        HamplardContract::MAX_MIN_COMPLETION_LEDGERS
+    );
+}
+
+#[test]
+#[should_panic(expected = "exceeds maximum allowed")]
+fn test_update_min_completion_ledgers_rejects_extreme_value() {
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    client
+        .update_min_completion_ledgers(&admin, &(HamplardContract::MAX_MIN_COMPLETION_LEDGERS + 1));
 }
 
 #[test]

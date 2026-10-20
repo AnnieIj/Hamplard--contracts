@@ -140,7 +140,7 @@ pub struct Course {
     pub price: i128,                   // enrollment price in USDC stroops
     pub platform_fee_percent: u32,     // 0-100; remainder goes to instructor
     pub token: Address,                // USDC Stellar Asset Contract
-    pub total_enrollments: u32,
+    pub total_enrollments: u32,        // non-refunded seats used; max_capacity is a lifetime cap
     pub total_earned: i128,
     pub status: CourseStatus,          // Pending | Active | Paused | Archived
     pub created_at_ledger: u32,

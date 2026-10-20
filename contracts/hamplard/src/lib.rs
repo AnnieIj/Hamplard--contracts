@@ -285,7 +285,9 @@ pub struct Course {
     pub platform_fee_percent: u32,
     /// USDC token contract address (Stellar Asset Contract)
     pub token: Address,
-    /// Total number of enrollments (incremented on each enroll)
+    /// Total number of non-refunded enrollments (incremented on each enroll
+    /// and re-enroll, decremented when an enrollment is refunded). `max_capacity`
+    /// is a lifetime cap on this counter, so a refund releases a seat.
     pub total_enrollments: u32,
     /// Total active enrollments (enrolled but not completed)
     pub active_enrollments: u32,
@@ -682,6 +684,11 @@ impl HamplardContract {
     /// after which a course is automatically paused as a circuit breaker.
     /// Reset to 0 on a successful enrollment. (#178)
     const CIRCUIT_BREAKER_THRESHOLD: u32 = 5;
+    /// Upper bound for the platform-wide minimum completion duration.
+    /// At 5 seconds per ledger this is roughly 58 days. Without an upper
+    /// bound an extreme value would make every newly registered course
+    /// impossible to complete. (#444)
+    pub(crate) const MAX_MIN_COMPLETION_LEDGERS: u32 = 1_000_000;
     /// Maximum number of categories a course can have (#165)
     const MAX_CATEGORIES: u32 = 10;
     /// Maximum length of a category name in characters (#165)
@@ -1687,6 +1694,11 @@ impl HamplardContract {
 
                         if course.active_enrollments > 0 {
                             course.active_enrollments -= 1;
+                        }
+                        // Capacity is a lifetime cap on non-refunded
+                        // enrollments, so a refund releases the seat. (#324)
+                        if course.total_enrollments > 0 {
+                            course.total_enrollments -= 1;
                         }
 
                         let total_active: u32 = env
@@ -4592,6 +4604,15 @@ impl HamplardContract {
         env.storage()
             .instance()
             .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
+
+        if ledgers > Self::MAX_MIN_COMPLETION_LEDGERS {
+            panic!(
+                "min completion ledgers {} exceeds maximum allowed {}",
+                ledgers,
+                Self::MAX_MIN_COMPLETION_LEDGERS
+            );
+        }
+
         env.storage()
             .instance()
             .set(&DataKey::DefaultMinCompletionLedgers, &ledgers);
@@ -4842,6 +4863,11 @@ impl HamplardContract {
             // Decrement active enrollments
             if course.active_enrollments > 0 {
                 course.active_enrollments -= 1;
+            }
+            // Capacity is a lifetime cap on non-refunded enrollments, so a
+            // refund releases the seat. (#324)
+            if course.total_enrollments > 0 {
+                course.total_enrollments -= 1;
             }
 
             course.last_updated_ledger = env.ledger().sequence();
