@@ -686,6 +686,9 @@ impl HamplardContract {
     const MAX_CATEGORIES: u32 = 10;
     /// Maximum length of a category name in characters (#165)
     const MAX_CATEGORY_LEN: u32 = 64;
+    /// 100% in basis points: upper bound for any single fee surcharge and for
+    /// the platform default fee plus all risk surcharges combined
+    const MAX_FEE_BPS: u32 = 10_000;
 
     // ----------------------------------------------------------
     // INIT
@@ -2948,13 +2951,13 @@ impl HamplardContract {
         if course.status != CourseStatus::Active {
             panic!("course is not available for enrollment");
         }
-        
+
         if let Some(start) = course.enrollment_start_ledger {
             if env.ledger().sequence() < start {
                 panic!("enrollment has not started for this course");
             }
         }
-            
+
         if !env
             .storage()
             .instance()
@@ -3037,7 +3040,12 @@ impl HamplardContract {
                 .unwrap_or_else(|| panic!("balance overflow during transfer verification"));
 
             if actual_received != course.price {
-                Self::emit_enrollment_failed(&env, &student, &course_id, "TRANSFER_AMOUNT_MISMATCH");
+                Self::emit_enrollment_failed(
+                    &env,
+                    &student,
+                    &course_id,
+                    "TRANSFER_AMOUNT_MISMATCH",
+                );
                 return;
             }
 
@@ -5645,6 +5653,14 @@ impl HamplardContract {
 
     /// Admin sets the risk fee configuration — parameters that determine
     /// surcharges based on payment size, customer history, and currency.
+    ///
+    /// # Panics
+    /// - If `large_payment_threshold` is negative
+    /// - If any surcharge exceeds 10000 bps (100%)
+    /// - If the platform default fee plus all three surcharges exceeds
+    ///   10000 bps, i.e. the worst case where every surcharge applies. A
+    ///   per-token fee override is not known here, so `compute_fee_breakdown`
+    ///   still caps the effective fee at 10000 bps at payment time.
     pub fn set_risk_fee_config(
         env: Env,
         admin: Address,
@@ -5658,6 +5674,30 @@ impl HamplardContract {
 
         if large_payment_threshold < 0 {
             panic!("large_payment_threshold cannot be negative");
+        }
+        if large_payment_surcharge_bps > Self::MAX_FEE_BPS {
+            panic!("large_payment_surcharge_bps cannot exceed 10000");
+        }
+        if new_customer_surcharge_bps > Self::MAX_FEE_BPS {
+            panic!("new_customer_surcharge_bps cannot exceed 10000");
+        }
+        if btc_eth_surcharge_bps > Self::MAX_FEE_BPS {
+            panic!("btc_eth_surcharge_bps cannot exceed 10000");
+        }
+
+        // Each term is <= 10000 here, so these additions cannot overflow u32.
+        let default_fee_bps: u32 = env
+            .storage()
+            .instance()
+            .get::<DataKey, u32>(&DataKey::DefaultFee)
+            .unwrap_or(20u32)
+            * 100;
+        let worst_case_bps = default_fee_bps
+            + large_payment_surcharge_bps
+            + new_customer_surcharge_bps
+            + btc_eth_surcharge_bps;
+        if worst_case_bps > Self::MAX_FEE_BPS {
+            panic!("default fee plus risk surcharges cannot exceed 10000 bps");
         }
 
         let config = RiskFeeConfig {
