@@ -1,3 +1,6 @@
+//! Contract version and source metadata are exposed via `contractmeta!`
+//! (readable with `stellar contract info meta`) and the `version()` entrypoint.
+//!
 //! # Hamplard Contract — Security Model
 //!
 //! ## Trust Hierarchy
@@ -110,6 +113,11 @@ extern crate std;
 use soroban_sdk::{
     contract, contractimpl, contracttype, token, Address, BytesN, Env, Map, String, Symbol, Vec,
 };
+
+// Embed version and source metadata into the deployed Wasm so operators can
+// identify which build is live after an upgrade.
+soroban_sdk::contractmeta!(key = "version", val = env!("CARGO_PKG_VERSION"));
+soroban_sdk::contractmeta!(key = "repo", val = "https://github.com/hamplard/hamplard");
 
 // ============================================================
 // FEE & RISK DATA TYPES
@@ -690,6 +698,12 @@ impl HamplardContract {
     // ----------------------------------------------------------
     // INIT
     // ----------------------------------------------------------
+
+    /// Returns the crate version of this contract build as a string.
+    /// Useful for verifying which implementation is live after an upgrade.
+    pub fn version(env: Env) -> String {
+        String::from_str(&env, env!("CARGO_PKG_VERSION"))
+    }
 
     /// Initialise the contract.
     /// Called once by the deployer immediately after deployment.
