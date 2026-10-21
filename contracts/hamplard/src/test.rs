@@ -1823,7 +1823,6 @@ fn test_archive_course_rejects_oversized_refund_list() {
 }
 
 #[test]
-#[should_panic]
 fn test_enroll_insufficient_funds_rollback() {
     let (env, contract_id, token_id, admin, sec_admin, treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
@@ -1845,10 +1844,10 @@ fn test_enroll_insufficient_funds_rollback() {
     // Student has enough for platform fee (100_000_000) but not the full course price
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &150_000_000);
 
-    // Enroll should panic because instructor transfer will fail
+    // Enrollment aborts when the full price transfer fails.
     client.enroll(&student, &course_id);
 
-    // Verify treasury didn't receive any tokens (rollback proof)
+    assert!(!client.is_enrolled(&student, &course_id));
     assert_eq!(token_client.balance(&treasury), 0);
     assert_eq!(token_client.balance(&student), 150_000_000);
 }
@@ -2552,7 +2551,7 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
     client.request_refund(&refund_student, &refund_course_id);
 
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.process_refund(&admin, &refund_student, &refund_course_id, &true);
+        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
     }));
     assert!(res.is_err(), "old admin must be rejected by process_refund");
 
@@ -4737,7 +4736,7 @@ fn test_refund_lifecycle() {
     // Approve refund
     let initial_balance = token::Client::new(&env, &token_id).balance(&student);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     let final_balance = token::Client::new(&env, &token_id).balance(&student);
     assert_eq!(final_balance - initial_balance, 1_000_000_000);
@@ -4802,7 +4801,7 @@ fn test_refund_rejection() {
 
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &false);
+    client.process_refund(&admin, &student, &course_id, &false, &None);
 
     let request = client.get_refund_request(&student, &course_id).unwrap();
     assert_eq!(request.status, RefundStatus::Rejected);
@@ -5420,7 +5419,7 @@ fn test_process_refund_event_includes_admin() {
     client.enroll(&student, &course_id);
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     let (event_student, event_course_id, event_approved, event_admin): (
         Address,
@@ -7548,6 +7547,7 @@ fn test_platform_counter_decrements_on_refund() {
         &student1,
         &String::from_str(&env, "COURSE-001"),
         &true,
+        &None,
     );
 
     // Counter should decrement
@@ -11254,6 +11254,115 @@ fn test_resolve_arbitration_payout_to_instructor() {
     assert_eq!(case.status, DisputeStatus::ResolvedForInstructor);
 }
 
+/// #465 — escalation must reject a course that is still Pending.
+#[test]
+#[should_panic(expected = "Error(Contract, #1)")]
+fn test_escalation_rejects_pending_course() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    client.set_arbitration_fee_config(&admin, &5_000_000);
+    let course_id = String::from_str(&env, "COURSE-ARB-PENDING");
+    client.register_course(
+        &instructor,
+        &course_id,
+        &1_000_000_000,
+        &token_id,
+        &0u32,
+        &None,
+        &BytesN::from_array(&env, &[1u8; 32]),
+        &soroban_sdk::Vec::new(&env),
+    );
+
+    let student = Address::generate(&env);
+    client.escalate_to_arbitration(&student, &course_id);
+}
+
+/// #465 — escalation must reject a course that has been Rejected.
+#[test]
+#[should_panic(expected = "Error(Contract, #1)")]
+fn test_escalation_rejects_rejected_course() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    client.set_arbitration_fee_config(&admin, &5_000_000);
+    let course_id = String::from_str(&env, "COURSE-ARB-REJECTED");
+    client.register_course(
+        &instructor,
+        &course_id,
+        &1_000_000_000,
+        &token_id,
+        &0u32,
+        &None,
+        &BytesN::from_array(&env, &[4u8; 32]),
+        &soroban_sdk::Vec::new(&env),
+    );
+    client.reject_course(
+        &admin,
+        &course_id,
+        &String::from_str(&env, "CONTENT_POLICY_VIOLATION"),
+    );
+
+    let student = Address::generate(&env);
+    client.escalate_to_arbitration(&student, &course_id);
+}
+
+/// #465 — escalation must reject a course whose token is no longer approved.
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_escalation_rejects_unapproved_token() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = setup_arbitration(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-ARB-UNAPPROVED-TOKEN",
+        5_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-ARB-UNAPPROVED-TOKEN");
+
+    client.remove_approved_token(&admin, &token_id);
+
+    client.escalate_to_arbitration(&student, &course_id);
+}
+
+/// #465 — escalation succeeds for an Active course with an approved token.
+#[test]
+fn test_escalation_active_course_approved_token_succeeds() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let fee_per_case = 5_000_000i128;
+    let student = setup_arbitration(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-ARB-ELIGIBLE",
+        fee_per_case,
+    );
+    let course_id = String::from_str(&env, "COURSE-ARB-ELIGIBLE");
+
+    let balance_before = token::Client::new(&env, &token_id).balance(&student);
+    client.escalate_to_arbitration(&student, &course_id);
+    let balance_after = token::Client::new(&env, &token_id).balance(&student);
+
+    assert_eq!(
+        balance_before - balance_after,
+        fee_per_case,
+        "eligible escalation must collect the configured fee"
+    );
+    let case = client
+        .get_arbitration_case(&student, &course_id)
+        .expect("eligible escalation must persist an arbitration case");
+    assert_eq!(case.status, DisputeStatus::Open);
+}
+
 // ============================================================
 // REFUND ENROLLMENT ARCHIVAL  (#254)
 // ============================================================
@@ -11290,7 +11399,7 @@ fn test_process_refund_archives_enrollment_to_history() {
     // Request and approve the refund.
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     // The active enrollment must no longer exist.
     assert!(
@@ -11346,7 +11455,7 @@ fn test_re_enroll_rejects_before_enrollment_start_ledger() {
         &admin,
         &student,
         &course_id,
-        &Some(String::from_str(&env, "evidence")),
+        &Some(evidence_hash(&env, "evidence")),
     );
 
     // Instructor sets the enrollment start ledger in the future
@@ -11381,7 +11490,7 @@ fn test_re_enroll_succeeds_at_enrollment_start_ledger() {
         &admin,
         &student,
         &course_id,
-        &Some(String::from_str(&env, "evidence")),
+        &Some(evidence_hash(&env, "evidence")),
     );
 
     let enrollment_start = env.ledger().sequence() + 10;
