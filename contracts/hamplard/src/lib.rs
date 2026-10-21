@@ -664,6 +664,12 @@ impl HamplardContract {
     /// Default revocation challenge period in ledger sequences
     /// (~17,280 ledgers ≈ 1 day at 5s/ledger).
     const DEFAULT_REVOCATION_CHALLENGE_PERIOD: u32 = 17_280;
+    /// Maximum allowed refund window in ledger sequences (~172,800 ledgers
+    /// ≈ 10 days at 5s/ledger). Bounds `update_refund_window()` so an
+    /// excessively long window cannot leave instructor earnings exposed
+    /// indefinitely or allow refunds long after a course was consumed.
+    /// `init()` and `update_refund_window()` must reject values above this.
+    pub(crate) const MAX_REFUND_WINDOW_LEDGERS: u32 = 172_800;
     /// Maximum number of course IDs allowed in a single `batch_enroll()` call.
     pub(crate) const MAX_BATCH_SIZE: u32 = 50;
     /// Maximum number of course IDs returned by a single `list_courses()` call.
