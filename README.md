@@ -1,4 +1,4 @@
-﻿# Hamplard — Contract Repo
+# Hamplard — Contract Repo
 
 > **On-chain course enrollment, payments, and certificate issuance on Stellar Soroban**
 
@@ -229,14 +229,50 @@ Initialises the contract. Called once by the deployer.
 ### Read-only queries
 
 | Function | Returns |
-|---|---|---|
-| `get_course(course_id)` | Full `Course` struct |
-| `get_enrollment(student, course_id)` | Full `Enrollment` struct |
-| `get_certificate(caller, certificate_id)` | Full `Certificate` struct (student, instructor, or admin only) |
+|---|---|
+| `get_course(course_id)` | `Option<Course>` — full `Course` struct if found |
+| `list_courses(offset, limit)` | `Vec<String>` — paginated list of registered course IDs (clamped to `MAX_PAGE_SIZE`) |
+| `get_enrollment(caller, student, course_id)` | `Option<Enrollment>` — full `Enrollment` struct (student, instructor, or admin only) |
+| `get_enrollment_history(caller, student, course_id)` | `Vec<Enrollment>` — archived past enrollments for a student and course (student, instructor, or admin only) |
+| `get_certificate(caller, certificate_id)` | `Certificate` — full `Certificate` struct (student, instructor, or admin only) |
+| `get_course_certificates(course_id)` | `Vec<String>` — certificate IDs issued for a course in issuance order |
 | `is_enrolled(student, course_id)` | `bool` |
-| `has_completed(student, course_id)` | `bool` |
-| `verify_certificate(certificate_id)` | `bool` — true if exists and not revoked |
-| `get_platform_fee()` | `u32` — current default fee % |
+| `has_completed(student, course_id)` | `Option<bool>` — `None` if not enrolled, `Some(false)` if incomplete/expired, `Some(true)` if completed |
+| `verify_certificate(certificate_id)` | `bool` — `true` if exists, not permanently revoked, and not expired |
+| `get_platform_fee(admin)` | `u32` — current default fee % (admin only) |
+| `get_instructor_earnings(instructor, token)` | `i128` — accumulated instructor earnings for a token |
+| `get_instructor_total_earnings(instructor)` | `i128` — accumulated instructor earnings across all tokens |
+| `get_instructor_course_count(instructor)` | `u32` — number of courses registered by an instructor |
+| `get_courses_by_instructor(instructor)` | `Vec<String>` — ordered list of course IDs registered by an instructor |
+| `get_instructor_stats(instructor)` | `InstructorStats` — aggregate students, completions, and certificates for an instructor |
+| `get_all_instructors(admin)` | `Vec<Address>` — list of all registered instructors (admin only) |
+| `get_instructor_count(admin)` | `u32` — total number of registered instructors (admin only) |
+| `is_instructor_frozen(instructor)` | `bool` — whether an instructor address is frozen |
+| `get_student_enrollment_count(student)` | `u32` — lifetime enrollment count for a student |
+| `is_student_blocked(student)` | `bool` — whether a student address is blocked |
+| `get_refund_request(student, course_id)` | `Option<RefundRequest>` — refund request record for a student and course |
+| `get_waitlist(course_id)` | `Option<Vec<Address>>` — ordered list of waitlisted students for a course |
+| `is_approver_address(address)` | `bool` — whether an address is an approved course approver |
+| `is_btc_eth_token(token)` | `bool` — whether a token is classified as BTC/ETH-denominated |
+| `get_high_value_course_threshold()` | `Option<i128>` — course price threshold requiring two-admin approval, if set |
+| `get_max_courses_limit()` | `u32` — maximum courses an instructor can register |
+| `get_admin_expiry()` | `Option<u32>` — ledger sequence when the admin role expires, if set |
+| `get_platform_enrollment_cap()` | `Option<u32>` — platform-wide maximum active enrollment cap, if set |
+| `get_total_active_enrollments()` | `u32` — current total active enrollments platform-wide |
+| `get_min_review_delay()` | `u32` — minimum ledgers required between course registration and approval |
+| `get_min_completion_ledgers()` | `u32` — default minimum ledgers required between enrollment and completion |
+| `get_refund_window()` | `u32` — refund window duration in ledger sequences |
+| `get_revocation_challenge_period()` | `u32` — challenge window in ledgers before certificate revocation is permanent |
+| `get_upgrade_timelock()` | `u32` — governance timelock in ledgers for contract upgrades |
+| `get_pending_upgrade()` | `Option<PendingUpgrade>` — pending contract Wasm upgrade proposal, if any |
+| `get_fee_config(token)` | `FeeConfig` — per-token fee configuration in basis points |
+| `get_arbitration_fee_config()` | `ArbitrationFeeConfig` — arbitration fee configuration per dispute case |
+| `get_arbitration_case(caller, course_id)` | `Option<ArbitrationCase>` — arbitration case record for a caller and course |
+| `is_risk_config_enabled()` | `bool` — whether risk-based fee surcharge pricing is enabled |
+| `get_risk_fee_config()` | `RiskFeeConfig` — current risk fee surcharge configuration |
+| `calculate_risk_score(student, token, payment_amount)` | `RiskScore` — computed risk score and surcharge bps for a payment |
+| `get_effective_fee_for_payment(student, token, payment_amount)` | `RiskFeeApplied` — full fee breakdown with risk surcharges applied |
+| `do_complete_payment(student, token, payment_amount)` | `RiskFeeApplied` — helper returning the effective fee breakdown for a payment |
 
 ---
 
@@ -272,7 +308,7 @@ stellar contract invoke \
   --certificate_id "CERT-12345-TAILORING"
 ```
 
-Returns `true` if the certificate exists and has not been revoked. The `get_certificate()` function returns the full record including the student's Stellar address, course title, instructor, and issuance ledger — all permanently recorded and independently auditable.
+Returns `true` if the certificate exists and has not been revoked. The `get_certificate(caller, certificate_id)` function (student, instructor, or admin only) returns the full record including the student's Stellar address, course title, instructor, and issuance ledger — all permanently recorded and independently auditable.
 
 ---
 
@@ -319,7 +355,7 @@ hamplard-contract/
 
 ```bash
 # Rust + wasm32 target
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+curl --proto '=https' --tlsv1.2 -sSf [https://sh.rustup.rs](https://sh.rustup.rs) | sh
 rustup target add wasm32v1-none
 
 # Stellar CLI
@@ -335,7 +371,7 @@ stellar keys fund my-account --network testnet
 ## Setup & Installation
 
 ```bash
-git clone https://github.com/your-org/hamplard-contract.git
+git clone [https://github.com/your-org/hamplard-contract.git](https://github.com/your-org/hamplard-contract.git)
 cd hamplard-contract
 cargo check
 ```
@@ -400,8 +436,12 @@ stellar contract invoke \
   --network testnet \
   -- init \
   --admin <ADMIN_ADDRESS> \
+  --secondary_admin <SECONDARY_ADMIN_ADDRESS> \
   --treasury <TREASURY_ADDRESS> \
-  --default_fee_pct 20
+  --default_fee_pct 20 \
+  --max_courses_per_instructor 50 \
+  --refund_window_ledgers 17280 \
+  --revocation_challenge_period 17280
 ```
 
 ### Register and approve a test course
@@ -417,7 +457,10 @@ stellar contract invoke \
   --course_id "COURSE-TAILORING-001" \
   --price 500000000 \
   --token <USDC_SAC_ADDRESS> \
-  --platform_fee_pct 0
+  --platform_fee_pct 0 \
+  --max_capacity null \
+  --content_hash 0101010101010101010101010101010101010101010101010101010101010101 \
+  --categories '["tailoring"]'
 
 # Approve
 stellar contract invoke \
@@ -425,7 +468,7 @@ stellar contract invoke \
   --source my-account \
   --network testnet \
   -- approve_course \
-  --admin <ADMIN_ADDRESS> \
+  --caller <ADMIN_ADDRESS> \
   --course_id "COURSE-TAILORING-001"
 ```
 
