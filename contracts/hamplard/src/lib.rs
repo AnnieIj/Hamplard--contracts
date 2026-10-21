@@ -5682,7 +5682,13 @@ impl HamplardContract {
     }
 
     /// Get the current risk fee configuration.
-    pub fn get_risk_fee_config(env: &Env) -> RiskFeeConfig {
+    pub fn get_risk_fee_config(env: Env) -> RiskFeeConfig {
+        Self::risk_fee_config(&env)
+    }
+
+    /// Internal accessor for the stored `RiskFeeConfig`, falling back to the
+    /// default configuration when none has been set.
+    fn risk_fee_config(env: &Env) -> RiskFeeConfig {
         env.storage()
             .instance()
             .get(&DataKey::RiskFeeConfig)
