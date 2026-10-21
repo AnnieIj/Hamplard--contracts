@@ -5733,7 +5733,14 @@ impl HamplardContract {
         payment_amount: i128,
     ) -> RiskFeeApplied {
         let (is_new_customer, is_btc_eth) = Self::resolve_risk_flags(&env, &student, &token);
-        Self::compute_fee_breakdown(&env, &token, payment_amount, is_new_customer, is_btc_eth)
+        Self::compute_fee_breakdown(
+            &env,
+            &token,
+            payment_amount,
+            None,
+            is_new_customer,
+            is_btc_eth,
+        )
     }
 
     /// Single source of truth for the `(is_new_customer, is_btc_eth)` risk
@@ -5805,10 +5812,17 @@ impl HamplardContract {
     /// Computes the full fee breakdown for a payment: per-token base fee
     /// (falling back to `DefaultFee`) plus any risk surcharge, capped at
     /// 100%. Shared by `deduct_fee()` and `get_effective_fee_for_payment()`.
+    ///
+    /// `course_fee_override_bps` is the course's explicit registration-time
+    /// fee override, if any. It acts as a floor on the live fee. Quotes pass
+    /// `None` because the public quote API is not course-scoped; the charge
+    /// path passes the enrolled course's override. Keeping the floor here
+    /// means every fee multiplication goes through the same overflow guard.
     fn compute_fee_breakdown(
         env: &Env,
         token: &Address,
         payment_amount: i128,
+        course_fee_override_bps: Option<u32>,
         is_new_customer: bool,
         is_btc_eth: bool,
     ) -> RiskFeeApplied {
@@ -5831,11 +5845,13 @@ impl HamplardContract {
         // Cap at 100% (10000 bps)
         let effective_fee_bps = base_fee_bps.saturating_add(risk_surcharge_bps).min(10000);
 
-        // Compute platform fee: amount * effective_bps / 10000
-        let platform_fee = payment_amount
-            .checked_mul(effective_fee_bps as i128)
-            .map(|v| v / 10000)
-            .unwrap_or_else(|| panic!("overflow computing platform fee"));
+        // Compute platform fee: amount * effective_bps / 10000. Both the
+        // quote and the charge use this helper, so overflow always panics
+        // with the same message instead of silently quoting a zero fee.
+        let mut platform_fee = Self::compute_fee_amount(payment_amount, effective_fee_bps);
+        if let Some(override_bps) = course_fee_override_bps {
+            platform_fee = platform_fee.max(Self::compute_fee_amount(payment_amount, override_bps));
+        }
 
         RiskFeeApplied {
             payment_amount,
@@ -5844,6 +5860,16 @@ impl HamplardContract {
             effective_fee_bps,
             platform_fee,
         }
+    }
+
+    /// Single overflow-checked fee multiplication: `amount * fee_bps / 10000`.
+    /// Panicking (rather than falling back to zero) keeps quotes honest: if a
+    /// charge cannot be computed, the quote must fail too.
+    fn compute_fee_amount(amount: i128, fee_bps: u32) -> i128 {
+        amount
+            .checked_mul(fee_bps as i128)
+            .map(|v| v / 10000)
+            .unwrap_or_else(|| panic!("overflow computing platform fee"))
     }
 
     /// Compute and deduct the platform fee from a payment amount.
@@ -5873,18 +5899,15 @@ impl HamplardContract {
             return (0, 0);
         }
 
-        let breakdown =
-            Self::compute_fee_breakdown(env, token, amount, is_new_customer, is_btc_eth);
-        // An explicit registration-time override is a floor on the live fee.
-        let platform_fee = if let Some(override_bps) = course_fee_override_bps {
-            let floor = amount
-                .checked_mul(override_bps as i128)
-                .map(|v| v / 10000)
-                .unwrap_or_else(|| panic!("overflow computing override platform fee"));
-            breakdown.platform_fee.max(floor)
-        } else {
-            breakdown.platform_fee
-        };
+        let breakdown = Self::compute_fee_breakdown(
+            env,
+            token,
+            amount,
+            course_fee_override_bps,
+            is_new_customer,
+            is_btc_eth,
+        );
+        let platform_fee = breakdown.platform_fee;
         let net_amount = amount - platform_fee;
 
         // Publish RiskFeeApplied event when a risk surcharge was applied
