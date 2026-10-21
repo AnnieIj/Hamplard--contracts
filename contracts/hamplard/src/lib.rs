@@ -33,6 +33,8 @@
 //! - `archive_course` — permanent course removal; may trigger student refunds
 //! - `transfer_admin` — proposes a new admin pair (new admins must then call `accept_admin`)
 //! - `update_treasury` — schedules a new treasury address (takes effect after 100 ledgers)
+//! - `finalize_treasury_update` — permissionless call that applies a matured pending treasury
+//!   update immediately and emits `treasury_activated`
 //! - `set_admin_expiry` — sets a ledger sequence when the admin role expires (blocks all admin operations)
 //! - `propose_upgrade` / `upgrade_contract` / `cancel_upgrade` — time-locked contract code
 //!   upgrade; see "Contract Upgrades" below
@@ -89,6 +91,9 @@
 //!   key cannot bypass the expiry check once it takes effect.
 //! - **Treasury update delay** — `update_treasury` takes effect 100 ledgers after proposal;
 //!   enrollments submitted within that window still route fees to the old treasury.
+//!   Call `finalize_treasury_update()` (permissionless) at or after the effective ledger to
+//!   apply the pending update on-chain and emit a `treasury_activated` event so indexers
+//!   can observe the exact ledger of the switch.
 //!
 //! ## Contract Upgrades
 //! - The contract can migrate to a new Wasm implementation in place, preserving all
@@ -1624,11 +1629,7 @@ impl HamplardContract {
         if let Some(ref students) = students_to_refund {
             let token_client = token::Client::new(&env, &course.token);
 
-            let treasury: Address = env
-                .storage()
-                .instance()
-                .get(&DataKey::Treasury)
-                .unwrap_or_else(|| panic!("treasury not set"));
+            let treasury: Address = Self::read_treasury(&env);
 
             for student in students.iter() {
                 let enrollment_key = DataKey::Enrollment(student.clone(), course_id.clone());
@@ -2478,23 +2479,7 @@ impl HamplardContract {
         );
 
         // Fetch treasury, applying any pending treasury update if effective
-        let mut treasury: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Treasury)
-            .unwrap_or_else(|| panic!("treasury not set"));
-
-        if let Some(pending) = env
-            .storage()
-            .instance()
-            .get::<DataKey, TreasuryUpdate>(&DataKey::PendingTreasury)
-        {
-            if env.ledger().sequence() >= pending.effective_ledger {
-                treasury = pending.address.clone();
-                env.storage().instance().set(&DataKey::Treasury, &treasury);
-                env.storage().instance().remove(&DataKey::PendingTreasury);
-            }
-        }
+        let treasury: Address = Self::read_treasury(env);
 
         // Transfer full price from student to contract, then distribute platform fee.
         //
@@ -2756,23 +2741,7 @@ impl HamplardContract {
             false,
         );
 
-        let mut treasury: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Treasury)
-            .unwrap_or_else(|| panic!("treasury not set"));
-
-        if let Some(pending) = env
-            .storage()
-            .instance()
-            .get::<DataKey, TreasuryUpdate>(&DataKey::PendingTreasury)
-        {
-            if env.ledger().sequence() >= pending.effective_ledger {
-                treasury = pending.address.clone();
-                env.storage().instance().set(&DataKey::Treasury, &treasury);
-                env.storage().instance().remove(&DataKey::PendingTreasury);
-            }
-        }
+        let treasury: Address = Self::read_treasury(env);
 
         let actual_amount_paid = if course.price > 0 {
             let balance_before = token_client.balance(&env.current_contract_address());
@@ -3003,23 +2972,7 @@ impl HamplardContract {
             is_btc_eth,
         );
 
-        let mut treasury: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Treasury)
-            .unwrap_or_else(|| panic!("treasury not set"));
-
-        if let Some(pending) = env
-            .storage()
-            .instance()
-            .get::<DataKey, TreasuryUpdate>(&DataKey::PendingTreasury)
-        {
-            if env.ledger().sequence() >= pending.effective_ledger {
-                treasury = pending.address.clone();
-                env.storage().instance().set(&DataKey::Treasury, &treasury);
-                env.storage().instance().remove(&DataKey::PendingTreasury);
-            }
-        }
+        let treasury: Address = Self::read_treasury(env);
 
         if course.price > 0 {
             let balance_before = token_client.balance(&env.current_contract_address());
@@ -4082,6 +4035,31 @@ impl HamplardContract {
         );
     }
 
+    /// Apply a matured pending treasury update and emit `treasury_activated`.
+    ///
+    /// This function is **permissionless** — any caller may invoke it once
+    /// the `effective_ledger` of the pending update has been reached.  It
+    /// exists so that:
+    ///
+    /// 1. Off-chain systems can trigger the on-chain treasury switch at an
+    ///    exact, predictable ledger without having to wait for the next
+    ///    enrollment to happen naturally.
+    /// 2. Every enrollment path (enroll, batch_enroll, re_enroll) and the
+    ///    archive refund path each call `read_treasury()`, which also applies
+    ///    the update lazily; this public entry point provides a dedicated,
+    ///    observable transaction for the switch that emits an event indexers
+    ///    can rely on.
+    ///
+    /// If no pending update exists, or its `effective_ledger` has not yet been
+    /// reached, the call is a no-op (returns the already-active treasury
+    /// address without emitting an event).
+    ///
+    /// # Returns
+    /// The current effective treasury address after the call.
+    pub fn finalize_treasury_update(env: Env) -> Address {
+        Self::read_treasury(&env)
+    }
+
     /// Update the default platform fee percentage.
     ///
     /// Rejects a `new_fee_pct` that is identical to the currently stored
@@ -4687,11 +4665,7 @@ impl HamplardContract {
                 .unwrap_or_else(|| panic!("refund split underflow"));
 
             let token_client = token::Client::new(&env, &course.token);
-            let treasury: Address = env
-                .storage()
-                .instance()
-                .get(&DataKey::Treasury)
-                .unwrap_or_else(|| panic!("treasury not set"));
+            let treasury: Address = Self::read_treasury(&env);
 
             // Refund platform fee from treasury, proportional to the request when
             // a partial amount is specified.
@@ -5317,6 +5291,52 @@ impl HamplardContract {
             .instance()
             .get(&DataKey::BtcEthToken(token.clone()))
             .unwrap_or(false)
+    }
+
+    /// Return the current effective treasury address.
+    ///
+    /// If a `PendingTreasury` update exists and its `effective_ledger` has
+    /// been reached, the update is applied atomically (promoting the pending
+    /// address to `DataKey::Treasury` and clearing `DataKey::PendingTreasury`)
+    /// and the new address is returned.  Otherwise the already-stored
+    /// `DataKey::Treasury` address is returned unchanged.
+    ///
+    /// Every code path that needs the treasury address must call this helper
+    /// instead of reading `DataKey::Treasury` directly, so the promotion is
+    /// never missed and there is exactly one place that owns the transition
+    /// logic.
+    fn read_treasury(env: &Env) -> Address {
+        let current: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Treasury)
+            .unwrap_or_else(|| panic!("treasury not set"));
+
+        if let Some(pending) = env
+            .storage()
+            .instance()
+            .get::<DataKey, TreasuryUpdate>(&DataKey::PendingTreasury)
+        {
+            if env.ledger().sequence() >= pending.effective_ledger {
+                let new_treasury = pending.address.clone();
+                env.storage()
+                    .instance()
+                    .set(&DataKey::Treasury, &new_treasury);
+                env.storage().instance().remove(&DataKey::PendingTreasury);
+
+                env.events().publish(
+                    (
+                        Symbol::new(env, "treasury_activated"),
+                        new_treasury.clone(),
+                    ),
+                    (new_treasury.clone(), env.ledger().sequence()),
+                );
+
+                return new_treasury;
+            }
+        }
+
+        current
     }
 
     fn is_admin(env: &Env, caller: &Address) -> bool {

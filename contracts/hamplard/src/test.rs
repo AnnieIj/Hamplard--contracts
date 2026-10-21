@@ -11398,3 +11398,144 @@ fn test_re_enroll_succeeds_at_enrollment_start_ledger() {
     assert!(!enrollment.completed);
     assert_eq!(enrollment.enrolled_at_ledger, enrollment_start);
 }
+
+// ============================================================
+// FINALIZE_TREASURY_UPDATE TESTS
+// ============================================================
+
+/// Calling finalize_treasury_update before the effective_ledger is a no-op:
+/// the pending update stays in storage, no treasury_activated event is emitted,
+/// and the old treasury address is returned.
+#[test]
+fn test_finalize_treasury_update_before_effective_is_noop() {
+    let (env, contract_id, token_id, admin, sec_admin, treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let new_treasury = Address::generate(&env);
+    client.update_treasury(&admin, &sec_admin, &new_treasury);
+
+    // Still before the 100-ledger delay — finalize must be a no-op
+    let returned = client.finalize_treasury_update();
+    assert_eq!(returned, treasury, "should still return the old treasury");
+
+    // treasury_activated must NOT have been emitted
+    let activated = env.events().all().iter().any(|(contract, topics, _)| {
+        if contract != contract_id {
+            return false;
+        }
+        let sym: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        sym == Symbol::new(&env, "treasury_activated")
+    });
+    assert!(!activated, "treasury_activated must not be emitted before effective_ledger");
+}
+
+/// Calling finalize_treasury_update at exactly the effective_ledger applies
+/// the update, emits treasury_activated, and returns the new address.
+#[test]
+fn test_finalize_treasury_update_at_effective_ledger() {
+    let (env, contract_id, token_id, admin, sec_admin, old_treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let new_treasury = Address::generate(&env);
+    client.update_treasury(&admin, &sec_admin, &new_treasury);
+
+    // Advance to exactly effective_ledger (current + 100)
+    env.ledger().with_mut(|l| {
+        l.sequence_number += 100;
+    });
+
+    let returned = client.finalize_treasury_update();
+    assert_eq!(returned, new_treasury, "should return the new treasury");
+
+    // treasury_activated event must carry the new address
+    let mut activated_count = 0u32;
+    for (contract, topics, data) in env.events().all().iter() {
+        if contract != contract_id {
+            continue;
+        }
+        let sym: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        if sym == Symbol::new(&env, "treasury_activated") {
+            activated_count += 1;
+            let topic_addr: Address = topics.get(1).unwrap().try_into_val(&env).unwrap();
+            assert_eq!(topic_addr, new_treasury);
+            let (ev_addr, _ledger): (Address, u32) = data.try_into_val(&env).unwrap();
+            assert_eq!(ev_addr, new_treasury);
+        }
+    }
+    assert_eq!(activated_count, 1, "treasury_activated must be emitted exactly once");
+}
+
+/// Calling finalize_treasury_update after the effective_ledger applies the
+/// update exactly once; a second call is a no-op (no second event).
+#[test]
+fn test_finalize_treasury_update_after_effective_ledger() {
+    let (env, contract_id, token_id, admin, sec_admin, _old_treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let new_treasury = Address::generate(&env);
+    client.update_treasury(&admin, &sec_admin, &new_treasury);
+
+    env.ledger().with_mut(|l| {
+        l.sequence_number += 200; // well past effective
+    });
+
+    let first = client.finalize_treasury_update();
+    assert_eq!(first, new_treasury);
+
+    // Second call: pending is already cleared — must be a no-op
+    let second = client.finalize_treasury_update();
+    assert_eq!(second, new_treasury, "should still return the new treasury");
+
+    // treasury_activated must have been emitted exactly once across both calls
+    let count = env
+        .events()
+        .all()
+        .iter()
+        .filter(|(contract, topics, _)| {
+            if contract != contract_id {
+                return false;
+            }
+            let sym: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+            sym == Symbol::new(&env, "treasury_activated")
+        })
+        .count();
+    assert_eq!(count, 1, "treasury_activated must be emitted exactly once total");
+}
+
+/// After a treasury update matures, enrollments route fees to the new treasury
+/// even when finalize_treasury_update() was never explicitly called — the lazy
+/// promotion inside read_treasury() handles it transparently.
+#[test]
+fn test_enroll_routes_fee_to_new_treasury_after_effective_ledger() {
+    let (env, contract_id, token_id, admin, sec_admin, old_treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &token_id);
+
+    let price: i128 = 1_000_000_000;
+    register_and_approve_course(
+        &env, &client, &token_id, &admin, &instructor,
+        "COURSE-TREASURY-LAZY", price,
+    );
+
+    let new_treasury = Address::generate(&env);
+    client.update_treasury(&admin, &sec_admin, &new_treasury);
+
+    // Advance past the effective_ledger
+    env.ledger().with_mut(|l| { l.sequence_number += 100; });
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &10_000_000_000);
+    client.enroll(&student, &String::from_str(&env, "COURSE-TREASURY-LAZY"));
+
+    let platform_fee = price * 20 / 100;
+    assert_eq!(token_client.balance(&old_treasury), 0, "old treasury must receive nothing");
+    assert_eq!(token_client.balance(&new_treasury), platform_fee, "new treasury must receive the fee");
+
+    // The lazy promotion inside enroll() must also have emitted treasury_activated
+    let activated = env.events().all().iter().any(|(contract, topics, _)| {
+        if contract != contract_id { return false; }
+        let sym: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        sym == Symbol::new(&env, "treasury_activated")
+    });
+    assert!(activated, "treasury_activated must be emitted by the lazy promotion path");
+}
