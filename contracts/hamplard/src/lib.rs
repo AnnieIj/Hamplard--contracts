@@ -4411,6 +4411,34 @@ impl HamplardContract {
         env.storage().instance().get(&DataKey::AdminExpiresAt)
     }
 
+    /// Current primary admin address.
+    pub fn get_admin(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic!("admin not set"))
+    }
+
+    /// Current secondary admin address.
+    pub fn get_secondary_admin(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::SecondaryAdmin)
+            .unwrap_or_else(|| panic!("secondary admin not set"))
+    }
+
+    /// Pending primary admin from `transfer_admin`, if any.
+    pub fn get_pending_admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::PendingAdmin)
+    }
+
+    /// Pending secondary admin from `transfer_admin`, if any.
+    pub fn get_pending_secondary_admin(env: Env) -> Option<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::PendingSecondaryAdmin)
+    }
+
     /// Set the platform-wide maximum total active enrollment cap.
     /// Pass `None` to remove the cap (unlimited enrollments).
     pub fn set_platform_enrollment_cap(env: Env, admin: Address, cap: Option<u32>) {
