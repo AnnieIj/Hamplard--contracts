@@ -596,6 +596,10 @@ pub enum DataKey {
     CourseFailureCount(String),
     /// Tokens classified as BTC/ETH-denominated for risk-surcharge pricing.
     BtcEthToken(Address),
+    /// Ordered list of all whitelisted token addresses.
+    /// Maintained in sync with `ApprovedToken(Address)` entries so that
+    /// `get_approved_tokens()` can enumerate them without an index scan.
+    ApprovedTokenList,
     /// Lifetime enrollment count per student (new-customer risk flag).
     StudentEnrollmentCount(Address),
 }
@@ -4121,9 +4125,30 @@ impl HamplardContract {
     pub fn add_approved_token(env: Env, admin: Address, token: Address) {
         admin.require_auth();
         Self::require_admin(&env, &admin, "add_approved_token");
+
+        // Guard: skip the write and list update if the token is already whitelisted.
+        if env
+            .storage()
+            .instance()
+            .has(&DataKey::ApprovedToken(token.clone()))
+        {
+            return;
+        }
+
         env.storage()
             .instance()
             .set(&DataKey::ApprovedToken(token.clone()), &true);
+
+        // Maintain the ordered list for get_approved_tokens().
+        let mut list: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ApprovedTokenList)
+            .unwrap_or_else(|| Vec::new(&env));
+        list.push_back(token.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::ApprovedTokenList, &list);
 
         env.events().publish(
             (Symbol::new(&env, "token_whitelisted"), admin.clone()),
@@ -4166,6 +4191,30 @@ impl HamplardContract {
         Self::is_btc_eth_token_internal(&env, &token)
     }
 
+    /// Returns `true` if the given token address is on the enrollment whitelist.
+    ///
+    /// No authentication required — instructors call this before registering a
+    /// course to confirm their chosen token is accepted by the platform.
+    pub fn is_token_approved(env: Env, token: Address) -> bool {
+        env.storage()
+            .instance()
+            .has(&DataKey::ApprovedToken(token))
+    }
+
+    /// Returns the full list of whitelisted token addresses.
+    ///
+    /// Admin-only. Returns every address that has been added via
+    /// `add_approved_token()` and not yet removed via `remove_approved_token()`.
+    /// The ordering is insertion order (append-only).
+    pub fn get_approved_tokens(env: Env, admin: Address) -> Vec<Address> {
+        admin.require_auth();
+        Self::require_admin(&env, &admin, "get_approved_tokens");
+        env.storage()
+            .instance()
+            .get(&DataKey::ApprovedTokenList)
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
     /// Returns the number of enrollments a student has ever created on the
     /// platform. Zero means their next enrollment is as a new customer.
     pub fn get_student_enrollment_count(env: Env, student: Address) -> u32 {
@@ -4182,6 +4231,23 @@ impl HamplardContract {
         env.storage()
             .instance()
             .remove(&DataKey::BtcEthToken(token.clone()));
+
+        // Remove the token from the ordered list maintained for get_approved_tokens().
+        let list: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ApprovedTokenList)
+            .unwrap_or_else(|| Vec::new(&env));
+        let mut updated = Vec::new(&env);
+        for i in 0..list.len() {
+            let entry = list.get(i).unwrap();
+            if entry != token {
+                updated.push_back(entry);
+            }
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::ApprovedTokenList, &updated);
 
         env.events().publish(
             (
