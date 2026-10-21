@@ -210,6 +210,8 @@ pub struct RiskFeeApplied {
     pub risk_surcharge_bps: u32,
     pub effective_fee_bps: u32,
     pub platform_fee: i128,
+    pub course_id: String,
+    pub student: Address,
 }
 
 /// Emitted when an enrollment is rejected due to course status.
