@@ -387,22 +387,22 @@ make optimize   # → target/wasm32v1-none/release/hamplard.optimized.wasm
 
 ```bash
 export STELLAR_ACCOUNT=my-account
-make deploy-testnet
-# → CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+export ADMIN_ADDRESS=<ADMIN_ADDRESS>
+export SECONDARY_ADMIN_ADDRESS=<SECONDARY_ADMIN_ADDRESS>
+export TREASURY_ADDRESS=<TREASURY_ADDRESS>
+export DEFAULT_FEE_PCT=20
+export MAX_COURSES_PER_INSTRUCTOR=10
+export REFUND_WINDOW_LEDGERS=17280
+export REVOCATION_CHALLENGE_PERIOD=17280
+make -C contracts/hamplard deploy-and-init-testnet
+# Prints the initialized contract ID and configuration
 ```
 
-### Initialize after deployment
-
-```bash
-stellar contract invoke \
-  --id <CONTRACT_ID> \
-  --source my-account \
-  --network testnet \
-  -- init \
-  --admin <ADMIN_ADDRESS> \
-  --treasury <TREASURY_ADDRESS> \
-  --default_fee_pct 20
-```
+`STELLAR_ACCOUNT` must be funded on testnet, and its signing key must match
+`ADMIN_ADDRESS` because initialization requires the admin's authorization. The
+target deploys the contract and immediately invokes `init` with the values above.
+Deployment and initialization are separate transactions; use the constructor-based
+deployment flow once the contract constructor is available to remove that interval.
 
 ### Register and approve a test course
 
