@@ -1888,9 +1888,9 @@ fn test_treasury_update_delay() {
     assert_eq!(token_client.balance(&treasury), platform_fee);
     assert_eq!(token_client.balance(&new_treasury), 0);
 
-    // Advance ledger sequence by 100
+    // Advance ledger sequence by delay
     env.ledger().with_mut(|l| {
-        l.sequence_number += 100;
+        l.sequence_number += HamplardContract::TREASURY_UPDATE_DELAY_LEDGERS;
     });
 
     // Enroll student_2 - fee should now go to the new treasury

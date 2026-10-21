@@ -32,7 +32,7 @@
 //! - `withdraw_tokens` — emergency sweep of contract-held tokens (both admins required)
 //! - `archive_course` — permanent course removal; may trigger student refunds
 //! - `transfer_admin` — proposes a new admin pair (new admins must then call `accept_admin`)
-//! - `update_treasury` — schedules a new treasury address (takes effect after 100 ledgers)
+//! - `update_treasury` — schedules a new treasury address (takes effect after `TREASURY_UPDATE_DELAY_LEDGERS` ledgers)
 //! - `set_admin_expiry` — sets a ledger sequence when the admin role expires (blocks all admin operations)
 //! - `propose_upgrade` / `upgrade_contract` / `cancel_upgrade` — time-locked contract code
 //!   upgrade; see "Contract Upgrades" below
@@ -87,7 +87,7 @@
 //!   `transfer_admin` / `accept_admin` flow with both current admins signing. Admin expiry
 //!   enforces that both admins must cooperate for critical operations; a single compromised
 //!   key cannot bypass the expiry check once it takes effect.
-//! - **Treasury update delay** — `update_treasury` takes effect 100 ledgers after proposal;
+//! - **Treasury update delay** — `update_treasury` takes effect 17,280 ledgers (~1 day) after proposal;
 //!   enrollments submitted within that window still route fees to the old treasury.
 //!
 //! ## Contract Upgrades
@@ -678,6 +678,11 @@ impl HamplardContract {
     /// `transfer_admin()` calls. Prevents rapid admin key rotation
     /// after a compromise (~17,280 ledgers ≈ 1 day at 5s/ledger). (#176)
     const MIN_ADMIN_TRANSFER_COOLDOWN: u32 = 17_280;
+    /// Time-lock delay in ledger sequences before a proposed treasury address
+    /// change takes effect (~17,280 ledgers ≈ 1 day at 5s/ledger).
+    /// Gives monitors and admins sufficient time to detect and react to a
+    /// malicious treasury change.
+    pub const TREASURY_UPDATE_DELAY_LEDGERS: u32 = 17_280;
     /// Number of consecutive enrollment failures (token-transfer errors)
     /// after which a course is automatically paused as a circuit breaker.
     /// Reset to 0 on a successful enrollment. (#178)
@@ -4004,8 +4009,8 @@ impl HamplardContract {
 
     /// Update the platform treasury address.
     /// Emits `treasury_updated` immediately so the pending change is
-    /// auditable in real time, even though it only takes effect 100
-    /// ledgers later (see `TreasuryUpdate`).
+    /// auditable in real time, even though it only takes effect
+    /// `TREASURY_UPDATE_DELAY_LEDGERS` ledgers later (see `TreasuryUpdate`).
     pub fn update_treasury(env: Env, admin1: Address, admin2: Address, new_treasury: Address) {
         admin1.require_auth();
         admin2.require_auth();
@@ -4060,7 +4065,7 @@ impl HamplardContract {
             .unwrap_or_else(|| panic!("treasury not set"));
 
         let ledger_sequence = env.ledger().sequence();
-        let effective_ledger = ledger_sequence + 100;
+        let effective_ledger = ledger_sequence + Self::TREASURY_UPDATE_DELAY_LEDGERS;
         let update = TreasuryUpdate {
             address: new_treasury.clone(),
             effective_ledger,
