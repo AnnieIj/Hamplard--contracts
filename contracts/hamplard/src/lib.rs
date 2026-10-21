@@ -111,6 +111,11 @@ use soroban_sdk::{
     contract, contractimpl, contracttype, token, Address, BytesN, Env, Map, String, Symbol, Vec,
 };
 
+/// Number of ledgers to extend the instance TTL by on user activity.
+const INSTANCE_TTL_EXTEND: u32 = 100_000;
+/// Threshold below which the instance TTL is extended.
+const INSTANCE_TTL_THRESHOLD: u32 = 50_000;
+
 // ============================================================
 // FEE & RISK DATA TYPES
 // ============================================================
