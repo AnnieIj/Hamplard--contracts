@@ -2372,6 +2372,59 @@ fn test_accept_admin_without_proposal_fails() {
 }
 
 #[test]
+fn test_get_admin_and_secondary_admin() {
+    let (env, contract_id, _token_id, admin, sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    assert_eq!(client.get_admin(), admin);
+    assert_eq!(client.get_secondary_admin(), sec_admin);
+}
+
+#[test]
+fn test_get_pending_admins_none_before_transfer() {
+    let (env, contract_id, _token_id, _admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    assert_eq!(client.get_pending_admin(), None);
+    assert_eq!(client.get_pending_secondary_admin(), None);
+}
+
+#[test]
+fn test_get_pending_admins_after_transfer_admin() {
+    let (env, contract_id, _token_id, admin, sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let new_admin = Address::generate(&env);
+    let new_sec = Address::generate(&env);
+
+    // Satisfy admin-transfer cooldown if last transfer ledger is set in other tests;
+    // on a fresh setup, transfer_admin should succeed.
+    env.ledger().with_mut(|l| {
+        l.sequence_number += 20_000;
+    });
+
+    client.transfer_admin(&admin, &sec_admin, &new_admin, &new_sec);
+
+    // Current admins unchanged until accept
+    assert_eq!(client.get_admin(), admin);
+    assert_eq!(client.get_secondary_admin(), sec_admin);
+
+    // Pending reflects proposal
+    assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
+    assert_eq!(
+        client.get_pending_secondary_admin(),
+        Some(new_sec.clone())
+    );
+
+    client.accept_admin(&new_admin, &new_sec);
+
+    assert_eq!(client.get_admin(), new_admin);
+    assert_eq!(client.get_secondary_admin(), new_sec);
+    assert_eq!(client.get_pending_admin(), None);
+    assert_eq!(client.get_pending_secondary_admin(), None);
+}
+
+#[test]
 #[should_panic(expected = "callers are not the pending admins")]
 fn test_accept_admin_wrong_address_fails() {
     let (env, contract_id, _, admin, sec_admin, _, _) = setup();
