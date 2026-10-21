@@ -5751,7 +5751,7 @@ impl HamplardContract {
 
     /// Computes the risk score and total surcharge (bps) for a payment.
     /// Surcharges only apply when risk pricing is enabled and a
-    /// `RiskFeeConfig` has been stored.
+    /// `RiskFeeConfig` is available (stored override or the default).
     fn risk_score_internal(
         env: &Env,
         payment_amount: i128,
@@ -5763,17 +5763,19 @@ impl HamplardContract {
             .instance()
             .get(&DataKey::RiskConfigEnabled)
             .unwrap_or(false);
-        let config: Option<RiskFeeConfig> = env.storage().instance().get(&DataKey::RiskFeeConfig);
 
-        let config = match config {
-            Some(config) if enabled => config,
-            _ => {
-                return RiskScore {
-                    score: 0,
-                    surcharge_bps: 0,
-                }
-            }
-        };
+        if !enabled {
+            return RiskScore {
+                score: 0,
+                surcharge_bps: 0,
+            };
+        }
+
+        // Use the same config source as `calculate_risk_score()` /
+        // `get_risk_fee_config()`: a stored override if present, otherwise
+        // the default RiskFeeConfig. This keeps quotes and charges in sync
+        // when risk pricing is enabled without a stored config.
+        let config = Self::get_risk_fee_config(env);
 
         let mut score: u32 = 0;
         let mut surcharge_bps: u32 = 0;
