@@ -87,6 +87,19 @@ fn register_and_approve_course(
     client.approve_course(admin, &String::from_str(env, course_id));
 }
 
+/// Fund the refund reserve for `token_id` from a fresh funder, as the treasury
+/// would in production. Refunds draw the platform-fee share from this reserve.
+fn fund_refund_reserve_for_test(
+    env: &Env,
+    client: &HamplardContractClient,
+    token_id: &Address,
+    amount: i128,
+) {
+    let funder = Address::generate(env);
+    token::StellarAssetClient::new(env, token_id).mint(&funder, &amount);
+    client.fund_refund_reserve(&funder, token_id, &amount);
+}
+
 /// Get the enrollment reference for a student/course pair.
 /// The enrollment reference is generated on-chain during enrollment
 /// and is used by issue_certificate to look up the enrollment.
@@ -1707,6 +1720,9 @@ fn test_archive_course_with_refunds() {
     );
 
     // Pause first — required before archiving
+    // The treasury pre-funds the refund reserve with the fees it collected.
+    client.fund_refund_reserve(&treasury, &token_id, &platform_fee_total);
+
     client.pause_course(&admin, &course_id);
 
     // Archive and refund both students
@@ -1736,6 +1752,7 @@ fn test_archive_course_with_refunds() {
 fn test_archive_course_incremental_refunds() {
     let (env, contract_id, token_id, admin, sec_admin, treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
+    fund_refund_reserve_for_test(&env, &client, &token_id, 10_000_000_000);
 
     let mut students: std::vec::Vec<Address> = std::vec::Vec::new();
     for _ in 0..5 {
@@ -2552,7 +2569,7 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
     client.request_refund(&refund_student, &refund_course_id);
 
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.process_refund(&admin, &refund_student, &refund_course_id, &true);
+        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
     }));
     assert!(res.is_err(), "old admin must be rejected by process_refund");
 
@@ -4704,6 +4721,7 @@ fn test_frozen_instructor_cannot_register_course() {
 fn test_refund_lifecycle() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
+    fund_refund_reserve_for_test(&env, &client, &token_id, 10_000_000_000);
 
     let student = Address::generate(&env);
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
@@ -4737,7 +4755,7 @@ fn test_refund_lifecycle() {
     // Approve refund
     let initial_balance = token::Client::new(&env, &token_id).balance(&student);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     let final_balance = token::Client::new(&env, &token_id).balance(&student);
     assert_eq!(final_balance - initial_balance, 1_000_000_000);
@@ -4802,7 +4820,7 @@ fn test_refund_rejection() {
 
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &false);
+    client.process_refund(&admin, &student, &course_id, &false, &None);
 
     let request = client.get_refund_request(&student, &course_id).unwrap();
     assert_eq!(request.status, RefundStatus::Rejected);
@@ -5402,6 +5420,7 @@ fn test_multi_sig_admin_events_record_both_actors() {
 fn test_process_refund_event_includes_admin() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
+    fund_refund_reserve_for_test(&env, &client, &token_id, 10_000_000_000);
 
     let student = Address::generate(&env);
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
@@ -5420,7 +5439,7 @@ fn test_process_refund_event_includes_admin() {
     client.enroll(&student, &course_id);
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     let (event_student, event_course_id, event_approved, event_admin): (
         Address,
@@ -7518,6 +7537,7 @@ fn test_platform_counter_decrements_on_completion() {
 fn test_platform_counter_decrements_on_refund() {
     let (env, contract_id, token_id, admin, sec_admin, treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
+    fund_refund_reserve_for_test(&env, &client, &token_id, 10_000_000_000);
 
     client.set_platform_enrollment_cap(&admin, &Some(2));
 
@@ -7548,6 +7568,7 @@ fn test_platform_counter_decrements_on_refund() {
         &student1,
         &String::from_str(&env, "COURSE-001"),
         &true,
+        &None,
     );
 
     // Counter should decrement
@@ -7616,6 +7637,7 @@ fn test_mark_completed_on_archived_course_rejected() {
 fn test_mark_completed_rejects_archived_course_even_with_active_enrollment() {
     let (env, contract_id, token_id, admin, sec_admin, treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
+    fund_refund_reserve_for_test(&env, &client, &token_id, 10_000_000_000);
 
     register_and_approve_course(
         &env,
@@ -11264,6 +11286,7 @@ fn test_resolve_arbitration_payout_to_instructor() {
 fn test_process_refund_archives_enrollment_to_history() {
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
+    fund_refund_reserve_for_test(&env, &client, &token_id, 10_000_000_000);
 
     let student = Address::generate(&env);
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
@@ -11290,7 +11313,7 @@ fn test_process_refund_archives_enrollment_to_history() {
     // Request and approve the refund.
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     // The active enrollment must no longer exist.
     assert!(
@@ -11346,7 +11369,7 @@ fn test_re_enroll_rejects_before_enrollment_start_ledger() {
         &admin,
         &student,
         &course_id,
-        &Some(String::from_str(&env, "evidence")),
+        &Some(BytesN::from_array(&env, &[7u8; 32])),
     );
 
     // Instructor sets the enrollment start ledger in the future
@@ -11381,7 +11404,7 @@ fn test_re_enroll_succeeds_at_enrollment_start_ledger() {
         &admin,
         &student,
         &course_id,
-        &Some(String::from_str(&env, "evidence")),
+        &Some(BytesN::from_array(&env, &[7u8; 32])),
     );
 
     let enrollment_start = env.ledger().sequence() + 10;
@@ -11397,4 +11420,164 @@ fn test_re_enroll_succeeds_at_enrollment_start_ledger() {
         .unwrap();
     assert!(!enrollment.completed);
     assert_eq!(enrollment.enrolled_at_ledger, enrollment_start);
+}
+
+// ============================================================
+// REFUNDS NEED ONLY ADMIN AUTH — NO TREASURY SIGNATURE (#309)
+// ============================================================
+
+/// Enrolled student with a pending refund request on a 20%-fee course.
+fn setup_pending_refund(
+    price: i128,
+) -> (Env, Address, Address, Address, Address, Address, Address, Address) {
+    let (env, contract_id, token_id, admin, sec_admin, treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-RESERVE",
+        price,
+    );
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &price);
+    let course_id = String::from_str(&env, "COURSE-RESERVE");
+    client.enroll(&student, &course_id);
+    client.request_refund(&student, &course_id);
+    (env, contract_id, token_id, admin, sec_admin, treasury, instructor, student)
+}
+
+#[test]
+fn test_process_refund_succeeds_with_only_admin_auth() {
+    let price: i128 = 1_000_000_000;
+    let (env, contract_id, token_id, admin, _sec_admin, treasury, instructor, student) =
+        setup_pending_refund(price);
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &token_id);
+    let course_id = String::from_str(&env, "COURSE-RESERVE");
+    let platform_fee = price * 20 / 100;
+
+    // The treasury funds the reserve once, signing only that call.
+    env.mock_auths(&[MockAuth {
+        address: &treasury,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "fund_refund_reserve",
+            args: (treasury.clone(), token_id.clone(), platform_fee).into_val(&env),
+            sub_invokes: &[MockAuthInvoke {
+                contract: &token_id,
+                fn_name: "transfer",
+                args: (treasury.clone(), contract_id.clone(), platform_fee).into_val(&env),
+                sub_invokes: &[],
+            }],
+        },
+    }]);
+    client.fund_refund_reserve(&treasury, &token_id, &platform_fee);
+    assert_eq!(client.get_refund_reserve(&token_id), platform_fee);
+
+    // From here on only the admin authorises anything — not the treasury.
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "process_refund",
+            args: (admin.clone(), student.clone(), course_id.clone(), true, None::<i128>).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
+
+    assert_eq!(token_client.balance(&student), price);
+    assert_eq!(token_client.balance(&treasury), 0);
+    assert_eq!(client.get_refund_reserve(&token_id), 0);
+    assert_eq!(client.get_instructor_earnings(&instructor, &token_id), 0);
+    assert!(!client.is_enrolled(&student, &course_id));
+}
+
+#[test]
+fn test_archive_course_refund_succeeds_with_only_admin_auths() {
+    let price: i128 = 1_000_000_000;
+    let (env, contract_id, token_id, admin, sec_admin, treasury, _instructor, student) =
+        setup_pending_refund(price);
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &token_id);
+    let course_id = String::from_str(&env, "COURSE-RESERVE");
+    let platform_fee = price * 20 / 100;
+
+    fund_refund_reserve_for_test(&env, &client, &token_id, platform_fee);
+    client.pause_course(&admin, &course_id);
+
+    let mut students = soroban_sdk::Vec::new(&env);
+    students.push_back(student.clone());
+    let students_opt = Some(students);
+    let args: soroban_sdk::Vec<Val> = (
+        admin.clone(),
+        sec_admin.clone(),
+        course_id.clone(),
+        students_opt.clone(),
+    )
+        .into_val(&env);
+    env.mock_auths(&[
+        MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "archive_course",
+                args: args.clone(),
+                sub_invokes: &[],
+            },
+        },
+        MockAuth {
+            address: &sec_admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "archive_course",
+                args,
+                sub_invokes: &[],
+            },
+        },
+    ]);
+    client.archive_course(&admin, &sec_admin, &course_id, &students_opt);
+
+    assert_eq!(token_client.balance(&student), price);
+    // The treasury keeps what it collected; the refund came from the reserve.
+    assert_eq!(token_client.balance(&treasury), platform_fee);
+    assert_eq!(client.get_refund_reserve(&token_id), 0);
+}
+
+#[test]
+#[should_panic(expected = "insufficient refund reserve")]
+fn test_process_refund_requires_funded_refund_reserve() {
+    let price: i128 = 1_000_000_000;
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor, student) =
+        setup_pending_refund(price);
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let course_id = String::from_str(&env, "COURSE-RESERVE");
+
+    client.process_refund(&admin, &student, &course_id, &true, &None);
+}
+
+#[test]
+fn test_fund_refund_reserve_requires_funder_auth() {
+    let (env, contract_id, token_id, _admin, _sec_admin, treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    token::StellarAssetClient::new(&env, &token_id).mint(&treasury, &1_000);
+
+    // No authorisation at all: the call must be rejected.
+    env.mock_auths(&[]);
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.fund_refund_reserve(&treasury, &token_id, &1_000);
+    }));
+    assert!(res.is_err(), "funding without the funder's auth must fail");
+    assert_eq!(client.get_refund_reserve(&token_id), 0);
+}
+
+#[test]
+#[should_panic(expected = "refund reserve amount must be greater than zero")]
+fn test_fund_refund_reserve_rejects_non_positive_amount() {
+    let (env, contract_id, token_id, _admin, _sec_admin, treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    client.fund_refund_reserve(&treasury, &token_id, &0);
 }

@@ -68,6 +68,11 @@
 //!   Any remainder (from integer truncation) stays with the instructor share.
 //! - The contract does **not** escrow student funds beyond the enrollment transaction;
 //!   post-enrollment refunds require admin-initiated archiving with an explicit refund list.
+//! - The platform-fee share of a refund is paid from a contract-held **refund reserve**
+//!   (`fund_refund_reserve` / `get_refund_reserve`), not from the treasury account, so
+//!   `process_refund` and `archive_course` need only the admin signature(s). The treasury
+//!   (or anyone) tops the reserve up in a separate, self-signed call; a refund that
+//!   exceeds the reserve panics with "insufficient refund reserve".
 //!
 //! ## What This Contract Does NOT Protect Against
 //! - **Off-chain content access** — the contract cannot enforce that a student actually
@@ -608,6 +613,9 @@ pub enum DataKey2 {
     HighValueCourseThreshold,
     /// Stores the first approver's address for a high-value course pending co-signature
     HighValueCourseApproval(String),
+    /// Contract-held reserve, per token, that funds the platform-fee share of
+    /// refunds so they never need a signature from the treasury account
+    RefundReserve(Address),
 }
 
 /// A proposed contract code upgrade awaiting its governance time-lock.
@@ -1624,12 +1632,6 @@ impl HamplardContract {
         if let Some(ref students) = students_to_refund {
             let token_client = token::Client::new(&env, &course.token);
 
-            let treasury: Address = env
-                .storage()
-                .instance()
-                .get(&DataKey::Treasury)
-                .unwrap_or_else(|| panic!("treasury not set"));
-
             for student in students.iter() {
                 let enrollment_key = DataKey::Enrollment(student.clone(), course_id.clone());
                 if env.storage().persistent().has(&enrollment_key) {
@@ -1641,7 +1643,12 @@ impl HamplardContract {
                         let instructor_amount = enrollment.instructor_amount;
 
                         if platform_amount > 0 {
-                            token_client.transfer(&treasury, &student, &platform_amount);
+                            Self::pay_platform_refund(
+                                &env,
+                                &course.token,
+                                &student,
+                                platform_amount,
+                            );
                         }
 
                         if instructor_amount > 0 {
@@ -4687,16 +4694,12 @@ impl HamplardContract {
                 .unwrap_or_else(|| panic!("refund split underflow"));
 
             let token_client = token::Client::new(&env, &course.token);
-            let treasury: Address = env
-                .storage()
-                .instance()
-                .get(&DataKey::Treasury)
-                .unwrap_or_else(|| panic!("treasury not set"));
 
-            // Refund platform fee from treasury, proportional to the request when
-            // a partial amount is specified.
+            // Refund the platform fee from the contract-held refund reserve (no
+            // treasury signature needed), proportional to the request when a
+            // partial amount is specified.
             if platform_refund > 0 {
-                token_client.transfer(&treasury, &student, &platform_refund);
+                Self::pay_platform_refund(&env, &course.token, &student, platform_refund);
             }
 
             // Refund instructor share from contract-held earnings, again using the
@@ -4768,6 +4771,60 @@ impl HamplardContract {
             (Symbol::new(&env, "refund_processed"), course_id.clone()),
             (student, course_id, approved, admin),
         );
+    }
+
+    /// Top up the refund reserve for `token`.
+    ///
+    /// Platform fees are forwarded to the treasury at enrollment, so refunding
+    /// the platform-fee share needs funds the contract itself holds. The
+    /// `funder` (normally the treasury) signs this transfer once, up front;
+    /// `process_refund()` and `archive_course()` then pay from the reserve
+    /// and need no treasury authorisation.
+    pub fn fund_refund_reserve(env: Env, funder: Address, token: Address, amount: i128) {
+        funder.require_auth();
+        if amount <= 0 {
+            panic!("refund reserve amount must be greater than zero");
+        }
+
+        let token_client = token::Client::new(&env, &token);
+        token_client.transfer(&funder, &env.current_contract_address(), &amount);
+
+        let key = DataKey2::RefundReserve(token.clone());
+        let balance: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        let new_balance = balance
+            .checked_add(amount)
+            .unwrap_or_else(|| panic!("refund reserve overflow"));
+        env.storage().persistent().set(&key, &new_balance);
+        env.storage().persistent().extend_ttl(
+            &key,
+            Self::PERSISTENT_TTL_THRESHOLD,
+            Self::PERSISTENT_TTL_EXTEND_TO,
+        );
+
+        env.events().publish(
+            (Symbol::new(&env, "refund_reserve_funded"), token),
+            (funder, amount, new_balance),
+        );
+    }
+
+    /// Get the contract-held refund reserve available for `token`.
+    pub fn get_refund_reserve(env: Env, token: Address) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey2::RefundReserve(token))
+            .unwrap_or(0)
+    }
+
+    /// Pay the platform-fee share of a refund to `student` out of the
+    /// contract-held refund reserve for `token`.
+    fn pay_platform_refund(env: &Env, token: &Address, student: &Address, amount: i128) {
+        let key = DataKey2::RefundReserve(token.clone());
+        let balance: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        if balance < amount {
+            panic!("insufficient refund reserve");
+        }
+        env.storage().persistent().set(&key, &(balance - amount));
+        token::Client::new(env, token).transfer(&env.current_contract_address(), student, &amount);
     }
 
     /// Get a refund request record by student and course ID
