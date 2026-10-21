@@ -2552,7 +2552,7 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
     client.request_refund(&refund_student, &refund_course_id);
 
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.process_refund(&admin, &refund_student, &refund_course_id, &true);
+        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
     }));
     assert!(res.is_err(), "old admin must be rejected by process_refund");
 
@@ -4737,7 +4737,7 @@ fn test_refund_lifecycle() {
     // Approve refund
     let initial_balance = token::Client::new(&env, &token_id).balance(&student);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     let final_balance = token::Client::new(&env, &token_id).balance(&student);
     assert_eq!(final_balance - initial_balance, 1_000_000_000);
@@ -4802,7 +4802,7 @@ fn test_refund_rejection() {
 
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &false);
+    client.process_refund(&admin, &student, &course_id, &false, &None);
 
     let request = client.get_refund_request(&student, &course_id).unwrap();
     assert_eq!(request.status, RefundStatus::Rejected);
@@ -5420,7 +5420,7 @@ fn test_process_refund_event_includes_admin() {
     client.enroll(&student, &course_id);
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     let (event_student, event_course_id, event_approved, event_admin): (
         Address,
@@ -7548,6 +7548,7 @@ fn test_platform_counter_decrements_on_refund() {
         &student1,
         &String::from_str(&env, "COURSE-001"),
         &true,
+        &None,
     );
 
     // Counter should decrement
@@ -11290,7 +11291,7 @@ fn test_process_refund_archives_enrollment_to_history() {
     // Request and approve the refund.
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
-    client.process_refund(&admin, &student, &course_id, &true);
+    client.process_refund(&admin, &student, &course_id, &true, &None);
 
     // The active enrollment must no longer exist.
     assert!(
@@ -11346,7 +11347,7 @@ fn test_re_enroll_rejects_before_enrollment_start_ledger() {
         &admin,
         &student,
         &course_id,
-        &Some(String::from_str(&env, "evidence")),
+        &Some(BytesN::from_array(&env, &[7u8; 32])),
     );
 
     // Instructor sets the enrollment start ledger in the future
@@ -11381,7 +11382,7 @@ fn test_re_enroll_succeeds_at_enrollment_start_ledger() {
         &admin,
         &student,
         &course_id,
-        &Some(String::from_str(&env, "evidence")),
+        &Some(BytesN::from_array(&env, &[7u8; 32])),
     );
 
     let enrollment_start = env.ledger().sequence() + 10;
@@ -11397,4 +11398,148 @@ fn test_re_enroll_succeeds_at_enrollment_start_ledger() {
         .unwrap();
     assert!(!enrollment.completed);
     assert_eq!(enrollment.enrolled_at_ledger, enrollment_start);
+}
+
+// ============================================================
+// REFUNDS REVERSE THE FEE SPLIT ACTUALLY CHARGED (#308)
+// ============================================================
+
+/// Per-token fee of 12% plus a 5% large-payment risk surcharge: 17% in total,
+/// which differs from the 20% platform default / `course.platform_fee_percent`.
+fn setup_custom_fee_split(price: i128) -> (Env, Address, Address, Address, Address, Address, Address) {
+    let (env, contract_id, token_id, admin, sec_admin, treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    client.set_fee_config(&admin, &token_id, &1200u32);
+    client.set_risk_config_enabled(&admin, &true);
+    client.set_risk_fee_config(&admin, &500u32, &500_000_000i128, &0u32, &0u32);
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-SPLIT",
+        price,
+    );
+    (env, contract_id, token_id, admin, sec_admin, treasury, instructor)
+}
+
+#[test]
+fn test_process_refund_reverses_exact_split_with_fee_config_and_risk() {
+    let price: i128 = 1_000_000_000;
+    let (env, contract_id, token_id, admin, _sec_admin, treasury, instructor) =
+        setup_custom_fee_split(price);
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &token_id);
+    let course_id = String::from_str(&env, "COURSE-SPLIT");
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &price);
+
+    client.enroll(&student, &course_id);
+
+    let platform_charged = price * 17 / 100;
+    let instructor_charged = price - platform_charged;
+    let enrollment = client.get_enrollment(&student, &student, &course_id).unwrap();
+    assert_eq!(enrollment.platform_amount, platform_charged);
+    assert_eq!(enrollment.instructor_amount, instructor_charged);
+    assert_eq!(token_client.balance(&treasury), platform_charged);
+    assert_eq!(
+        client.get_instructor_earnings(&instructor, &token_id),
+        instructor_charged
+    );
+
+    // The per-token fee changes after enrollment; the refund must not care.
+    client.set_fee_config(&admin, &token_id, &4000u32);
+
+    client.request_refund(&student, &course_id);
+    env.mock_all_auths_allowing_non_root_auth();
+    client.process_refund(&admin, &student, &course_id, &true, &None);
+
+    assert_eq!(token_client.balance(&student), price);
+    assert_eq!(token_client.balance(&treasury), 0);
+    assert_eq!(client.get_instructor_earnings(&instructor, &token_id), 0);
+}
+
+#[test]
+fn test_process_refund_partial_uses_charged_split_ratio() {
+    let price: i128 = 1_000_000_000;
+    let (env, contract_id, token_id, admin, _sec_admin, treasury, instructor) =
+        setup_custom_fee_split(price);
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &token_id);
+    let course_id = String::from_str(&env, "COURSE-SPLIT");
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &price);
+    client.enroll(&student, &course_id);
+
+    client.request_refund(&student, &course_id);
+    env.mock_all_auths_allowing_non_root_auth();
+    // Refund half: half of the 17% platform share, half of the 83% instructor share.
+    client.process_refund(&admin, &student, &course_id, &true, &Some(price / 2));
+
+    assert_eq!(token_client.balance(&student), price / 2);
+    assert_eq!(token_client.balance(&treasury), price * 17 / 100 - price * 17 / 200);
+    assert_eq!(
+        client.get_instructor_earnings(&instructor, &token_id),
+        price * 83 / 100 - (price / 2 - price * 17 / 200)
+    );
+}
+
+#[test]
+fn test_archive_course_refund_reverses_exact_split_with_fee_config_and_risk() {
+    let price: i128 = 1_000_000_000;
+    let (env, contract_id, token_id, admin, sec_admin, treasury, instructor) =
+        setup_custom_fee_split(price);
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &token_id);
+    let course_id = String::from_str(&env, "COURSE-SPLIT");
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &price);
+    client.enroll(&student, &course_id);
+    assert_eq!(token_client.balance(&treasury), price * 17 / 100);
+
+    client.pause_course(&admin, &course_id);
+    let mut students = soroban_sdk::Vec::new(&env);
+    students.push_back(student.clone());
+    env.mock_all_auths_allowing_non_root_auth();
+    client.archive_course(&admin, &sec_admin, &course_id, &Some(students));
+
+    assert_eq!(token_client.balance(&student), price);
+    assert_eq!(token_client.balance(&treasury), 0);
+    assert_eq!(client.get_instructor_earnings(&instructor, &token_id), 0);
+}
+
+#[test]
+fn test_re_enroll_then_refund_reverses_exact_split_with_fee_config_and_risk() {
+    let price: i128 = 1_000_000_000;
+    let (env, contract_id, token_id, admin, _sec_admin, treasury, instructor) =
+        setup_custom_fee_split(price);
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &token_id);
+    let course_id = String::from_str(&env, "COURSE-SPLIT");
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &(price * 2));
+    client.enroll(&student, &course_id);
+    client.mark_completed(&admin, &student, &course_id, &None);
+    client.re_enroll(&student, &course_id);
+
+    let enrollment = client.get_enrollment(&student, &student, &course_id).unwrap();
+    assert_eq!(enrollment.platform_amount, price * 17 / 100);
+    assert_eq!(enrollment.instructor_amount, price - price * 17 / 100);
+
+    client.request_refund(&student, &course_id);
+    env.mock_all_auths_allowing_non_root_auth();
+    client.process_refund(&admin, &student, &course_id, &true, &None);
+
+    // Only the re-enrollment payment is returned; the first purchase stays.
+    assert_eq!(token_client.balance(&student), price);
+    assert_eq!(token_client.balance(&treasury), price * 17 / 100);
+    assert_eq!(
+        client.get_instructor_earnings(&instructor, &token_id),
+        price - price * 17 / 100
+    );
 }
