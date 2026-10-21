@@ -11398,3 +11398,99 @@ fn test_re_enroll_succeeds_at_enrollment_start_ledger() {
     assert!(!enrollment.completed);
     assert_eq!(enrollment.enrolled_at_ledger, enrollment_start);
 }
+#[test]
+fn test_risk_rules_all_combinations_and_threshold_boundary() {
+    let config = RiskFeeConfig {
+        large_payment_threshold: 100,
+        large_payment_surcharge_bps: 11,
+        new_customer_surcharge_bps: 23,
+        btc_eth_surcharge_bps: 47,
+    };
+    // Explicit expected values keep the test independent of the rule implementation.
+    let cases = [
+        (100, false, false, (0, 0)),
+        (101, false, false, (30, 11)),
+        (100, true, false, (40, 23)),
+        (100, false, true, (30, 47)),
+        (101, true, false, (70, 34)),
+        (101, false, true, (60, 58)),
+        (100, true, true, (70, 70)),
+        (101, true, true, (100, 81)),
+        (i128::MIN, false, false, (0, 0)),
+        (i128::MAX, true, true, (100, 81)),
+    ];
+    for (amount, new_customer, btc_eth, expected) in cases {
+        assert_eq!(
+            risk_surcharge(true, Some(&config), amount, new_customer, btc_eth),
+            expected
+        );
+    }
+}
+
+#[test]
+fn test_risk_rules_config_gating_and_saturating_surcharges() {
+    let config = RiskFeeConfig {
+        large_payment_threshold: 0,
+        large_payment_surcharge_bps: u32::MAX,
+        new_customer_surcharge_bps: 1,
+        btc_eth_surcharge_bps: u32::MAX,
+    };
+    assert_eq!(risk_surcharge(true, None, i128::MAX, true, true), (0, 0));
+    assert_eq!(risk_surcharge(false, None, i128::MAX, true, true), (0, 0));
+    assert_eq!(
+        risk_surcharge(false, Some(&config), i128::MAX, true, true),
+        (0, 0)
+    );
+    assert_eq!(
+        risk_surcharge(true, Some(&config), 1, true, true),
+        (100, u32::MAX)
+    );
+}
+
+#[test]
+fn test_risk_defaults_and_overflow_match_fee_deduction() {
+    let (env, contract_id, token_id, admin, _, _, _) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let student = Address::generate(&env);
+    let amount = 1_000_000_000_001i128;
+
+    // Enabling risk without storing a config must not activate the getter's defaults.
+    client.set_risk_config_enabled(&admin, &true);
+    let missing = client.calculate_risk_score(&student, &token_id, &amount);
+    assert_eq!((missing.score, missing.surcharge_bps), (0, 0));
+    let default_quote = client.get_effective_fee_for_payment(&student, &token_id, &amount);
+    assert_eq!(default_quote.risk_surcharge_bps, 0);
+    assert_eq!(
+        env.as_contract(&contract_id, || {
+            HamplardContract::deduct_fee(&env, &token_id, amount, None, false, false)
+        }),
+        (
+            amount - default_quote.platform_fee,
+            default_quote.platform_fee
+        )
+    );
+
+    client.set_risk_fee_config(&admin, &u32::MAX, &0, &1, &u32::MAX);
+    let risk = client.calculate_risk_score(&student, &token_id, &amount);
+    assert_eq!((risk.score, risk.surcharge_bps), (30, u32::MAX));
+    let quote = client.get_effective_fee_for_payment(&student, &token_id, &amount);
+    assert_eq!(quote.risk_surcharge_bps, u32::MAX);
+    assert_eq!(quote.effective_fee_bps, 10_000);
+    assert_eq!(quote.platform_fee, amount);
+    assert_eq!(
+        env.as_contract(&contract_id, || {
+            HamplardContract::deduct_fee(&env, &token_id, amount, None, false, false)
+        }),
+        (0, amount)
+    );
+
+    client.set_risk_config_enabled(&admin, &false);
+    assert_eq!(
+        client.calculate_risk_score(&student, &token_id, &amount),
+        missing
+    );
+    assert_eq!(
+        client.get_effective_fee_for_payment(&student, &token_id, &amount),
+        default_quote
+    );
+}

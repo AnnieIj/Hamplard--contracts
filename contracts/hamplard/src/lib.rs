@@ -627,6 +627,46 @@ pub struct PendingUpgrade {
 // CONTRACT
 // ============================================================
 
+/// Pure surcharge rules shared by risk previews and payment fee deduction.
+/// Missing configuration or disabled risk pricing yields no score or surcharge.
+fn risk_surcharge(
+    enabled: bool,
+    config: Option<&RiskFeeConfig>,
+    payment_amount: i128,
+    is_new_customer: bool,
+    is_btc_eth: bool,
+) -> (u32, u32) {
+    let config = match config {
+        Some(config) if enabled => config,
+        _ => {
+            return (0, 0);
+        }
+    };
+
+    let mut score: u32 = 0;
+    let mut surcharge_bps: u32 = 0;
+
+    // Large payment surcharge
+    if payment_amount > config.large_payment_threshold {
+        score = score.saturating_add(30);
+        surcharge_bps = surcharge_bps.saturating_add(config.large_payment_surcharge_bps);
+    }
+
+    // New customer surcharge
+    if is_new_customer {
+        score = score.saturating_add(40);
+        surcharge_bps = surcharge_bps.saturating_add(config.new_customer_surcharge_bps);
+    }
+
+    // BTC/ETH surcharge
+    if is_btc_eth {
+        score = score.saturating_add(30);
+        surcharge_bps = surcharge_bps.saturating_add(config.btc_eth_surcharge_bps);
+    }
+
+    (score, surcharge_bps)
+}
+
 #[contract]
 pub struct HamplardContract;
 
@@ -5765,37 +5805,13 @@ impl HamplardContract {
             .unwrap_or(false);
         let config: Option<RiskFeeConfig> = env.storage().instance().get(&DataKey::RiskFeeConfig);
 
-        let config = match config {
-            Some(config) if enabled => config,
-            _ => {
-                return RiskScore {
-                    score: 0,
-                    surcharge_bps: 0,
-                }
-            }
-        };
-
-        let mut score: u32 = 0;
-        let mut surcharge_bps: u32 = 0;
-
-        // Large payment surcharge
-        if payment_amount > config.large_payment_threshold {
-            score = score.saturating_add(30);
-            surcharge_bps = surcharge_bps.saturating_add(config.large_payment_surcharge_bps);
-        }
-
-        // New customer surcharge
-        if is_new_customer {
-            score = score.saturating_add(40);
-            surcharge_bps = surcharge_bps.saturating_add(config.new_customer_surcharge_bps);
-        }
-
-        // BTC/ETH surcharge
-        if is_btc_eth {
-            score = score.saturating_add(30);
-            surcharge_bps = surcharge_bps.saturating_add(config.btc_eth_surcharge_bps);
-        }
-
+        let (score, surcharge_bps) = risk_surcharge(
+            enabled,
+            config.as_ref(),
+            payment_amount,
+            is_new_customer,
+            is_btc_eth,
+        );
         RiskScore {
             score,
             surcharge_bps,
