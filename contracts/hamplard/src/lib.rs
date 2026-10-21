@@ -5916,6 +5916,25 @@ impl HamplardContract {
         let course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| panic!("course not found"));
 
+        // Only an enrolled student (current or historical) or the course
+        // instructor may open a dispute on a course.
+        let is_instructor = caller == course.instructor;
+        let is_current_student = env
+            .storage()
+            .persistent()
+            .has(&DataKey::Enrollment(caller.clone(), course_id.clone()));
+        let is_historical_student = env
+            .storage()
+            .persistent()
+            .has(&DataKey::EnrollmentHistory(caller.clone(), course_id.clone()));
+
+        if !is_instructor && !is_current_student && !is_historical_student {
+            panic!(
+                "unauthorized: caller is not enrolled in or the instructor of course {:?}",
+                course_id
+            );
+        }
+
         // Reject duplicate open cases for the same (caller, course_id) pair.
         let case_key = ArbitrationCaseKey {
             caller: caller.clone(),

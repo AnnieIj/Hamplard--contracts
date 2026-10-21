@@ -11255,6 +11255,113 @@ fn test_resolve_arbitration_payout_to_instructor() {
 }
 
 // ============================================================
+// ESCALATION AUTHORIZATION  (#464)
+// ============================================================
+
+/// #464 — escalate_to_arbitration() must reject a caller who is neither
+/// enrolled in the course (current or historical) nor its instructor.
+#[test]
+#[should_panic(expected = "unauthorized: caller is not enrolled in or the instructor of course")]
+fn test_escalation_rejects_unrelated_caller() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let fee_per_case = 5_000_000i128;
+    let course_id_str = "COURSE-ARB-AUTH-UNRELATED";
+    setup_arbitration(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        course_id_str,
+        fee_per_case,
+    );
+    let course_id = String::from_str(&env, course_id_str);
+
+    // An unrelated third party with no enrollment and not the instructor.
+    let outsider = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&outsider, &100_000_000_000);
+
+    client.escalate_to_arbitration(&outsider, &course_id);
+}
+
+/// #464 — the course instructor may escalate_to_arbitration() without being enrolled.
+#[test]
+fn test_escalation_allows_instructor() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let fee_per_case = 5_000_000i128;
+    let course_id_str = "COURSE-ARB-AUTH-INSTRUCTOR";
+    setup_arbitration(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        course_id_str,
+        fee_per_case,
+    );
+    let course_id = String::from_str(&env, course_id_str);
+
+    // Instructor escalates (not enrolled).
+    client.escalate_to_arbitration(&instructor, &course_id);
+
+    let case = client
+        .get_arbitration_case(&instructor, &course_id)
+        .expect("instructor escalation must create a retrievable case");
+    assert_eq!(case.caller, instructor);
+    assert_eq!(case.instructor, instructor);
+}
+
+/// #464 — a historical student (EnrollmentHistory, no active enrollment) may escalate.
+#[test]
+fn test_escalation_allows_historical_student() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let fee_per_case = 5_000_000i128;
+    let course_id_str = "COURSE-ARB-AUTH-HISTORICAL";
+    let student = setup_arbitration(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        course_id_str,
+        fee_per_case,
+    );
+    let course_id = String::from_str(&env, course_id_str);
+
+    // Archive the student's active enrollment into EnrollmentHistory and remove
+    // the active record, simulating a past (historical) enrollment.
+    let enrollment = client
+        .get_enrollment(&student, &student, &course_id)
+        .unwrap();
+    let history_key = DataKey::EnrollmentHistory(student.clone(), course_id.clone());
+    env.as_contract(&contract_id, || {
+        let mut history: soroban_sdk::Vec<Enrollment> = soroban_sdk::Vec::new(&env);
+        history.push_back(enrollment.clone());
+        env.storage().persistent().set(&history_key, &history);
+        env.storage().persistent().remove(&DataKey::Enrollment(
+            student.clone(),
+            course_id.clone(),
+        ));
+    });
+
+    // Student is no longer actively enrolled but has a historical record.
+    assert!(!client.is_enrolled(&student, &course_id));
+
+    client.escalate_to_arbitration(&student, &course_id);
+
+    let case = client
+        .get_arbitration_case(&student, &course_id)
+        .expect("historical student escalation must create a retrievable case");
+    assert_eq!(case.caller, student);
+}
+
+// ============================================================
 // REFUND ENROLLMENT ARCHIVAL  (#254)
 // ============================================================
 
