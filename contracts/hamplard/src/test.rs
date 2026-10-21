@@ -5132,12 +5132,13 @@ fn test_events_emitted_for_admin_operations() {
 
     // update_max_courses_limit
     client.update_max_courses_limit(&admin, &99u32);
-    let (event_admin, event_max): (Address, u32) =
+    let (event_admin, event_old, event_new): (Address, u32, u32) =
         last_event_val(&env, &contract_id, "max_courses_limit_updated")
             .try_into_val(&env)
             .unwrap();
     assert_eq!(event_admin, admin);
-    assert_eq!(event_max, 99u32);
+    assert_eq!(event_old, 50u32);
+    assert_eq!(event_new, 99u32);
 
     // freeze_instructor / unfreeze_instructor
     client.freeze_instructor(&admin, &instructor);
@@ -5158,21 +5159,68 @@ fn test_events_emitted_for_admin_operations() {
 
     // update_min_review_delay
     client.update_min_review_delay(&admin, &5u32);
-    let (event_admin, event_delay): (Address, u32) =
+    let (event_admin, event_old, event_new): (Address, u32, u32) =
         last_event_val(&env, &contract_id, "min_review_delay_updated")
             .try_into_val(&env)
             .unwrap();
     assert_eq!(event_admin, admin);
-    assert_eq!(event_delay, 5u32);
+    assert_eq!(event_old, 0u32);
+    assert_eq!(event_new, 5u32);
+
+    // update_min_completion_ledgers
+    client.update_min_completion_ledgers(&admin, &10u32);
+    let (event_admin, event_old, event_new): (Address, u32, u32) =
+        last_event_val(&env, &contract_id, "min_completion_ledgers_updated")
+            .try_into_val(&env)
+            .unwrap();
+    assert_eq!(event_admin, admin);
+    assert_eq!(event_old, 0u32);
+    assert_eq!(event_new, 10u32);
 
     // update_refund_window
     client.update_refund_window(&admin, &2000u32);
-    let (event_admin, event_window): (Address, u32) =
+    let (event_admin, event_old, event_new): (Address, u32, u32) =
         last_event_val(&env, &contract_id, "refund_window_updated")
             .try_into_val(&env)
             .unwrap();
     assert_eq!(event_admin, admin);
-    assert_eq!(event_window, 2000u32);
+    assert_eq!(event_old, 1000u32);
+    assert_eq!(event_new, 2000u32);
+
+    // set_platform_enrollment_cap
+    client.set_platform_enrollment_cap(&admin, &Some(500u32));
+    let (event_admin, event_old, event_new): (Address, Option<u32>, Option<u32>) =
+        last_event_val(&env, &contract_id, "platform_enrollment_cap_set")
+            .try_into_val(&env)
+            .unwrap();
+    assert_eq!(event_admin, admin);
+    assert_eq!(event_old, None);
+    assert_eq!(event_new, Some(500u32));
+
+    // set_fee_config
+    client.set_fee_config(&admin, &token_id, &250u32);
+    let (event_token, event_old, event_new): (Address, Option<u32>, u32) =
+        last_event_val(&env, &contract_id, "fee_config_updated")
+            .try_into_val(&env)
+            .unwrap();
+    assert_eq!(event_token, token_id);
+    assert_eq!(event_old, None);
+    assert_eq!(event_new, 250u32);
+
+    // set_admin_expiry
+    client.set_admin_expiry(&admin, &sec_admin, &Some(1_000_000u32));
+    let (event_admin1, event_admin2, event_old, event_new): (
+        Address,
+        Address,
+        Option<u32>,
+        Option<u32>,
+    ) = last_event_val(&env, &contract_id, "admin_expiry_set")
+        .try_into_val(&env)
+        .unwrap();
+    assert_eq!(event_admin1, admin);
+    assert_eq!(event_admin2, sec_admin);
+    assert_eq!(event_old, None);
+    assert_eq!(event_new, Some(1_000_000u32));
 
     // withdraw_tokens requires both admins and a positive amount.
     let destination = Address::generate(&env);
