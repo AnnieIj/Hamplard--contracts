@@ -108,7 +108,7 @@
 extern crate std;
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, token, Address, BytesN, Env, Map, String, Symbol, Vec,
+    contract, contractimpl, contracttype, token, Address, Bytes, BytesN, Env, Map, String, Symbol, Vec,
 };
 
 // ============================================================
@@ -852,6 +852,22 @@ impl HamplardContract {
     ///   must be at least the token's current fee and is charged at enrollment
     ///   as a floor on the live per-token fee.
     /// - `content_hash`     — 32-byte hash of the off-chain course content at registration time
+    fn normalize_course_id(env: &Env, input: &String) -> String {
+        let raw = input.to_bytes();
+        let mut out = Bytes::new(env);
+        let mut i = 0;
+        while i < raw.len() {
+            let b = raw.get(i).unwrap();
+            if b == b' ' || b == b'\t' || b == b'\n' || b == b'\r' {
+                panic!("course_id must not contain whitespace");
+            }
+            out.push_back(if b'A' <= b && b <= b'Z' { b + 32 } else { b });
+            i += 1;
+        }
+        if out.len() == 0 { panic!("course_id must not be empty"); }
+        String::from_bytes(env, &out)
+    }
+
     pub fn register_course(
         env: Env,
         instructor: Address,
@@ -864,6 +880,7 @@ impl HamplardContract {
         categories: Vec<String>,
     ) -> String {
         instructor.require_auth();
+        let course_id = Self::normalize_course_id(&env, &course_id);
 
         // Validate that the token address is a contract (not an EOA)
         let token_client = token::Client::new(&env, &token);
