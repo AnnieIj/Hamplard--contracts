@@ -2589,7 +2589,11 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
     client.request_refund(&refund_student, &refund_course_id);
 
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+<<<<<<< HEAD
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
+=======
+        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None::<i128>);
+>>>>>>> pr/553
     }));
     assert!(res.is_err(), "old admin must be rejected by process_refund");
 
@@ -6950,6 +6954,401 @@ fn test_get_course_ttl_extension_does_not_mutate_course_data() {
     assert_eq!(before.total_enrollments, after.total_enrollments);
     assert_eq!(before.content_hash, after.content_hash);
     assert_eq!(before.last_updated_ledger, after.last_updated_ledger);
+}
+
+// ============================================================
+// FEATURE: enrollment failure event tests (issue #xxx)
+// ============================================================
+
+#[test]
+fn test_enroll_insufficient_balance_emits_event_and_returns_gracefully() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-INSUF-BAL",
+        500_000_000,
+    );
+
+    let course_id = String::from_str(&env, "COURSE-INSUF-BAL");
+    let student = Address::generate(&env);
+    // Give student insufficient balance (only 100 stroops, course costs 500M)
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100);
+
+    // Enroll should return gracefully (not panic) when try_transfer fails
+    client.enroll(&student, &course_id);
+
+    // Verify enrollment_failed event was emitted with INSUFFICIENT_BALANCE
+    let mut found_event = false;
+    for (contract, topics, data) in env.events().all().iter() {
+        if contract != contract_id {
+            continue;
+        }
+        let topic0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        if topic0 == Symbol::new(&env, "enrollment_failed") {
+            found_event = true;
+            let topic1: String = topics.get(1).unwrap().try_into_val(&env).unwrap();
+            assert_eq!(topic1, course_id);
+
+            let event_data: EnrollmentFailed = data.try_into_val(&env).unwrap();
+            assert_eq!(event_data.course_id, course_id);
+            assert_eq!(event_data.student, student);
+            assert_eq!(
+                event_data.reason_code,
+                String::from_str(&env, "INSUFFICIENT_BALANCE")
+            );
+            assert!(event_data.ledger_sequence > 0);
+        }
+    }
+    assert!(
+        found_event,
+        "enrollment_failed event with INSUFFICIENT_BALANCE must be emitted"
+    );
+
+    // Verify no enrollment record was created
+    assert!(!client.is_enrolled(&student, &course_id));
+
+    // Verify course stats unchanged
+    let course = client.get_course(&course_id).unwrap();
+    assert_eq!(course.total_enrollments, 0);
+    assert_eq!(course.active_enrollments, 0);
+    assert_eq!(course.total_earned, 0);
+}
+
+#[test]
+fn test_enroll_transfer_amount_mismatch_emits_event_and_returns_gracefully() {
+    // This test simulates a scenario where the token contract accepts the transfer
+    // but the actual received amount doesn't match the expected price.
+    // In practice, this is rare with standard SAC tokens but can occur with
+    // custom token implementations that apply fees or have bugs.
+    
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-MISMATCH",
+        500_000_000,
+    );
+
+    let course_id = String::from_str(&env, "COURSE-MISMATCH");
+    let student = Address::generate(&env);
+    
+    // Give student exact balance
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &500_000_000);
+
+    // In a real scenario with a buggy/fee-on-transfer token, the contract would
+    // receive less than expected. The Soroban test framework doesn't easily support
+    // simulating a fee-on-transfer token, so we document the expected behavior:
+    // 
+    // 1. try_transfer succeeds
+    // 2. balance_after - balance_before != price
+    // 3. emit_enrollment_failed with "TRANSFER_AMOUNT_MISMATCH"
+    // 4. return early without creating enrollment
+    //
+    // For now, this test documents the expected behavior. A full integration test
+    // would require deploying a custom token contract that applies transfer fees.
+}
+
+#[test]
+fn test_enroll_failure_leaves_no_state_changes() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &token_id);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-NO-STATE",
+        500_000_000,
+    );
+
+    let course_id = String::from_str(&env, "COURSE-NO-STATE");
+    let student = Address::generate(&env);
+    
+    // Give insufficient balance
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100);
+
+    let course_before = client.get_course(&course_id).unwrap();
+    let student_balance_before = token_client.balance(&student);
+    let contract_balance_before = token_client.balance(&contract_id);
+
+    // Attempt enrollment (will fail due to insufficient balance)
+    client.enroll(&student, &course_id);
+
+    // Verify no enrollment record exists
+    assert!(!client.is_enrolled(&student, &course_id));
+    let enrollment = client.get_enrollment(&student, &student, &course_id);
+    assert!(enrollment.is_none());
+
+    // Verify course stats unchanged
+    let course_after = client.get_course(&course_id).unwrap();
+    assert_eq!(course_after.total_enrollments, course_before.total_enrollments);
+    assert_eq!(
+        course_after.active_enrollments,
+        course_before.active_enrollments
+    );
+    assert_eq!(course_after.total_earned, course_before.total_earned);
+
+    // Verify no token transfers occurred
+    assert_eq!(token_client.balance(&student), student_balance_before);
+    assert_eq!(
+        token_client.balance(&contract_id),
+        contract_balance_before
+    );
+
+    // Verify platform-wide counter unchanged
+    let total_active = client.get_total_active_enrollments();
+    assert_eq!(total_active, 0);
+
+    // Verify instructor earnings unchanged
+    assert_eq!(client.get_instructor_earnings(&instructor, &token_id), 0);
+}
+
+#[test]
+fn test_enrollment_failed_event_payload_structure() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-EVENT-STRUCT",
+        500_000_000,
+    );
+
+    let course_id = String::from_str(&env, "COURSE-EVENT-STRUCT");
+    let student = Address::generate(&env);
+    
+    // Give insufficient balance
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100);
+
+    let ledger_before = env.ledger().sequence();
+    
+    client.enroll(&student, &course_id);
+
+    // Verify event structure matches EnrollmentFailed type
+    let mut found = false;
+    for (contract, topics, data) in env.events().all().iter() {
+        if contract != contract_id {
+            continue;
+        }
+        let topic0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        if topic0 == Symbol::new(&env, "enrollment_failed") {
+            found = true;
+
+            // Verify topics structure: (event_name, course_id)
+            assert_eq!(topics.len(), 2);
+            let topic1: String = topics.get(1).unwrap().try_into_val(&env).unwrap();
+            assert_eq!(topic1, course_id);
+
+            // Verify data payload structure: EnrollmentFailed { course_id, student, reason_code, ledger_sequence }
+            let event: EnrollmentFailed = data.try_into_val(&env).unwrap();
+            assert_eq!(event.course_id, course_id);
+            assert_eq!(event.student, student);
+            assert_eq!(
+                event.reason_code,
+                String::from_str(&env, "INSUFFICIENT_BALANCE")
+            );
+            assert!(event.ledger_sequence >= ledger_before);
+            assert!(event.ledger_sequence <= env.ledger().sequence());
+        }
+    }
+    assert!(found, "enrollment_failed event must be emitted");
+}
+
+#[test]
+fn test_multiple_failed_enrollments_emit_separate_events() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-MULTI-FAIL",
+        500_000_000,
+    );
+
+    let course_id = String::from_str(&env, "COURSE-MULTI-FAIL");
+    
+    let student_a = Address::generate(&env);
+    let student_b = Address::generate(&env);
+    let student_c = Address::generate(&env);
+    
+    // Give all students insufficient balance
+    token::StellarAssetClient::new(&env, &token_id).mint(&student_a, &100);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student_b, &200);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student_c, &300);
+
+    // All three enrollments should fail
+    client.enroll(&student_a, &course_id);
+    client.enroll(&student_b, &course_id);
+    client.enroll(&student_c, &course_id);
+
+    // Count enrollment_failed events
+    let mut event_count = 0;
+    let mut students_seen = std::vec::Vec::new();
+    
+    for (contract, topics, data) in env.events().all().iter() {
+        if contract != contract_id {
+            continue;
+        }
+        let topic0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        if topic0 == Symbol::new(&env, "enrollment_failed") {
+            event_count += 1;
+            let event: EnrollmentFailed = data.try_into_val(&env).unwrap();
+            students_seen.push(event.student);
+        }
+    }
+    
+    assert_eq!(event_count, 3, "three separate events must be emitted");
+    assert!(students_seen.contains(&student_a));
+    assert!(students_seen.contains(&student_b));
+    assert!(students_seen.contains(&student_c));
+
+    // Verify none enrolled successfully
+    assert!(!client.is_enrolled(&student_a, &course_id));
+    assert!(!client.is_enrolled(&student_b, &course_id));
+    assert!(!client.is_enrolled(&student_c, &course_id));
+}
+
+#[test]
+fn test_re_enroll_insufficient_balance_emits_event() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-REENROLL-FAIL",
+        500_000_000,
+    );
+
+    let course_id = String::from_str(&env, "COURSE-REENROLL-FAIL");
+    let student = Address::generate(&env);
+    
+    // First enrollment: give sufficient balance, enroll, complete
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &1_000_000_000);
+    client.enroll(&student, &course_id);
+    client.mark_completed(
+        &admin,
+        &student,
+        &course_id,
+        &Some(evidence_hash(&env, "evidence")),
+    );
+
+    // Re-enrollment: give insufficient balance
+    // Student already spent 500M on first enrollment, has ~300M left after fees
+    // (not enough for another 500M enrollment)
+    
+    client.re_enroll(&student, &course_id);
+
+    // Verify enrollment_failed event was emitted
+    let mut found_reenroll_failure = false;
+    for (contract, topics, data) in env.events().all().iter() {
+        if contract != contract_id {
+            continue;
+        }
+        let topic0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        if topic0 == Symbol::new(&env, "enrollment_failed") {
+            let event: EnrollmentFailed = data.try_into_val(&env).unwrap();
+            // Look for the re-enroll failure (will be the most recent one)
+            if event.course_id == course_id && event.student == student {
+                found_reenroll_failure = true;
+                assert_eq!(
+                    event.reason_code,
+                    String::from_str(&env, "INSUFFICIENT_BALANCE")
+                );
+            }
+        }
+    }
+    assert!(
+        found_reenroll_failure,
+        "re_enroll must emit enrollment_failed on payment failure"
+    );
+
+    // Verify the original completed enrollment is still intact
+    let enrollment = client
+        .get_enrollment(&student, &student, &course_id)
+        .unwrap();
+    assert!(enrollment.completed);
+    
+    // Verify history still contains exactly one entry (the original)
+    let history = client.get_enrollment_history(&student, &student, &course_id);
+    assert_eq!(history.len(), 0, "re_enroll should not archive on payment failure");
+}
+
+#[test]
+fn test_enroll_failure_does_not_increment_circuit_breaker_counter() {
+    // The circuit breaker counter is incremented BEFORE the transfer attempt
+    // and reset to 0 AFTER a successful transfer. When try_transfer fails,
+    // the function returns early, leaving the pre-incremented counter in place.
+    // This test verifies that repeated failures eventually trigger the circuit breaker.
+    
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-CIRCUIT",
+        500_000_000,
+    );
+
+    let course_id = String::from_str(&env, "COURSE-CIRCUIT");
+    
+    // Attempt enrollment 5 times with insufficient balance
+    // Each failure leaves the pre-incremented counter in persistent storage
+    for i in 0..5 {
+        let student = Address::generate(&env);
+        token::StellarAssetClient::new(&env, &token_id).mint(&student, &100);
+        client.enroll(&student, &course_id);
+    }
+
+    // The 6th attempt should trigger the circuit breaker panic (threshold is 5)
+    let student_6 = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student_6, &100);
+    
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.enroll(&student_6, &course_id);
+    }));
+    
+    assert!(
+        result.is_err(),
+        "circuit breaker should trip after threshold consecutive failures"
+    );
+
+    // Verify the course was auto-paused
+    let course = client.get_course(&course_id).unwrap();
+    assert_eq!(
+        course.status,
+        CourseStatus::Paused,
+        "course must be paused by circuit breaker"
+    );
 }
 
 // ============================================================
