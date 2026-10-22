@@ -7,8 +7,8 @@ description = "Hamplard — On-chain course enrollment, payments, and certificat
 authors = ["Hamplard Team"]
 repository = "https://github.com/hamplard/hamplard"
 
-lib]
-crate-type = ["cdylib"]
+[lib]
+crate-type = ["cdylib", "rlib"]
 doctest = false
 
 [dependencies]
