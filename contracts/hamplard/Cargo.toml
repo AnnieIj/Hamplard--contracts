@@ -7,11 +7,11 @@ description = "Hamplard — On-chain course enrollment, payments, and certificat
 authors = ["Hamplard Team"]
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 doctest = false
 
 [dependencies]
 soroban-sdk = { workspace = true }
 
 [dev-dependencies]
-soroban-sdk = { workspace = true, features = ["testutils"] }
+soroban-sdy = { workspace = true, features = ["testutils"] }
