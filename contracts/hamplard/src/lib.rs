@@ -5564,6 +5564,23 @@ impl HamplardContract {
         );
     }
 
+    /// Admin removes the per-token fee configuration override so the token
+    /// goes back to following the platform default fee (`DefaultFee`).
+    /// Removing a non-existent override is a no-op.
+    pub fn remove_fee_config(env: Env, admin: Address, token: Address) {
+        admin.require_auth();
+        Self::require_admin(&env, &admin, "remove_fee_config");
+
+        env.storage()
+            .instance()
+            .remove(&DataKey::FeeConfig(token.clone()));
+
+        env.events().publish(
+            (Symbol::new(&env, "fee_config_removed"), admin.clone()),
+            token,
+        );
+    }
+
     /// Get the per-token fee configuration. Returns the platform default
     /// (converted to bps) if no per-token override has been set.
     pub fn get_fee_config(env: Env, token: Address) -> FeeConfig {
