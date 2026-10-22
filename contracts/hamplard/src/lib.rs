@@ -1695,16 +1695,30 @@ impl HamplardContract {
         );
     }
 
-    /// Admin archives a course permanently.
-    /// Only admin can archive — this is a moderation action.
+    /// Admin archives a course permanently and optionally issues refunds.
+    /// This is the primary refund mechanism in Hamplard — only admins can initiate refunds.
     ///
-    /// Supports partial refunds: if `students_to_refund` is provided, only
-    /// those students are refunded. If `active_enrollments` reaches zero
-    /// after the refunds, the course is archived. Otherwise the call
-    /// refunds the requested students and returns, leaving the course in
-    /// `Paused` state so admins can continue refunding in follow-up calls.
-    /// `Pending` and `Rejected` courses can also be archived because they
-    /// cannot have enrollments.
+    /// **Refund Behavior:**
+    /// - If `students_to_refund` is provided, the contract refunds each listed student
+    ///   their full enrollment amount (both platform fee and instructor share)
+    /// - Only incomplete enrollments are refunded (where `completed == false`)
+    /// - Refunds are proportionally sourced from the platform treasury and instructor account
+    /// - There is no time window restriction — refunds can be issued at any point
+    ///   so long as the course is paused before archiving
+    ///
+    /// **Multi-admin Authorization:**
+    /// Both `admin1` and `admin2` must sign this transaction (multi-sig requirement).
+    /// This prevents a single compromised admin from unilaterally refunding or archiving courses.
+    ///
+    /// **Course State Requirement:**
+    /// The course must be in `Paused` status before archiving. This is a safety mechanism
+    /// to prevent accidental archive of active courses. Pause first, then archive.
+    ///
+    /// # Arguments
+    /// - `admin1`              — primary admin address (must sign)
+    /// - `admin2`              — secondary admin address (must sign)
+    /// - `course_id`           — the course to archive
+    /// - `students_to_refund`  — optional list of student addresses to refund
     pub fn archive_course(
         env: Env,
         admin1: Address,
