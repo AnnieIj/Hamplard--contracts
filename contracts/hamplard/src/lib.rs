@@ -231,6 +231,7 @@ use soroban_sdk::{
 >>>>>>> pr/563
 };
 
+<<<<<<< HEAD
 /// Stable contract error codes returned by every failure path.
 ///
 /// Codes are part of the public interface: clients and indexers should
@@ -290,119 +291,23 @@ pub enum Error {
     UpgradeError = 49,
     InconsistentState = 50,
 }
+=======
+mod types;
+mod storage;
+mod events;
+mod errors;
+mod fees;
+mod course;
+mod enrollment;
+mod certificate;
+mod admin;
+
+pub use types::*;
+>>>>>>> pr/565
 
 // ============================================================
 // FEE & RISK DATA TYPES
 // ============================================================
-
-/// Per-token fee configuration — allows the admin to configure different
-/// platform fee rates for different approved tokens.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct FeeConfig {
-    /// Basis points (0-10000) charged as platform fee for this token.
-    /// E.g. 2000 = 20%, 500 = 5%, 0 = free.
-    pub fee_bps: u32,
-}
-
-/// Configuration for arbitration fee per case.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct ArbitrationFeeConfig {
-    /// Minimum fee required to escalate a dispute to arbitration,
-    /// denominated in the settlement token's stroops.
-    pub fee_per_case: i128,
-}
-
-/// Composite storage key for an arbitration case (caller + course_id).
-/// Used as a direct storage key to avoid exceeding DataKey's 50-variant XDR limit.
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct ArbitrationCaseKey {
-    pub caller: Address,
-    pub course_id: String,
-}
-
-/// The outcome / lifecycle status of an arbitration case.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub enum DisputeStatus {
-    /// Awaiting admin resolution.
-    Open,
-    /// Admin ruled in favour of the student (fee refunded to caller).
-    ResolvedForStudent,
-    /// Admin ruled in favour of the instructor (fee paid to instructor).
-    ResolvedForInstructor,
-}
-
-/// A persistent record of an arbitration case created by `escalate_to_arbitration`.
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct ArbitrationCase {
-    /// Unique case identifier (student address + course_id).
-    pub case_id: String,
-    /// The student / caller who escalated the dispute.
-    pub caller: Address,
-    /// The course this dispute concerns.
-    pub course_id: String,
-    /// Instructor of the course at the time the case was opened.
-    pub instructor: Address,
-    /// Token used for the course (arbitration fee was collected in this token).
-    pub token: Address,
-    /// Arbitration fee collected at escalation time.
-    pub fee_paid: i128,
-    /// Ledger sequence when the case was opened.
-    pub opened_at_ledger: u32,
-    /// Current status of the case.
-    pub status: DisputeStatus,
-}
-
-/// Configuration for risk-based fee surcharges.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct RiskFeeConfig {
-    /// Extra basis points added for large payments above `large_payment_threshold`
-    pub large_payment_surcharge_bps: u32,
-    /// Threshold in stroops above which a payment is considered "large"
-    pub large_payment_threshold: i128,
-    /// Extra basis points added for new customers (first enrollment)
-    pub new_customer_surcharge_bps: u32,
-    /// Extra basis points for BTC/ETH currency (higher volatility)
-    pub btc_eth_surcharge_bps: u32,
-}
-
-/// A computed risk score with the associated surcharge.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct RiskScore {
-    /// The computed risk score (0-100, arbitrary scale)
-    pub score: u32,
-    /// Total surcharge basis points to add to base fee
-    pub surcharge_bps: u32,
-}
-
-/// Emitted when a risk-adjusted fee is applied to a payment.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct RiskFeeApplied {
-    pub payment_amount: i128,
-    pub base_fee_bps: u32,
-    pub risk_surcharge_bps: u32,
-    pub effective_fee_bps: u32,
-    pub platform_fee: i128,
-}
-
-/// Emitted when an enrollment is rejected due to course status.
-/// Includes course_id, student address, course status, and ledger sequence
-/// so rejection reasons are auditable off-chain.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct EnrollmentRejected {
-    pub course_id: String,
-    pub student: Address,
-    pub status: CourseStatus,
-    pub ledger_sequence: u32,
-}
 
 /// Emitted when an enrollment payment fails, along with the scoped reason code.
 #[contracttype]
