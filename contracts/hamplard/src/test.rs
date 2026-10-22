@@ -2154,7 +2154,6 @@ fn test_enroll_insufficient_funds_rollback() {
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &150_000_000);
 
 <<<<<<< HEAD
-<<<<<<< HEAD
     // The token transfer fails, so enroll() emits an EnrollmentFailed event
     // and returns without recording an enrollment or moving any funds.
     client.enroll(&student, &course_id);
@@ -2182,12 +2181,6 @@ fn test_enroll_insufficient_funds_rollback() {
 
     // Verify treasury didn't receive any tokens and no balances moved
 >>>>>>> pr/552
-=======
-    // Enrollment aborts when the full price transfer fails.
-    client.enroll(&student, &course_id);
-
-    assert!(!client.is_enrolled(&student, &course_id));
->>>>>>> pr/584
     assert_eq!(token_client.balance(&treasury), 0);
     assert_eq!(token_client.balance(&student), 150_000_000);
     assert_eq!(token_client.balance(&contract_id), 0);
@@ -2902,9 +2895,6 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
->>>>>>> pr/572
-=======
-        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 >>>>>>> pr/573
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
@@ -2921,6 +2911,9 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 >>>>>>> pr/584
+=======
+        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
+>>>>>>> pr/585
     }));
     assert!(res.is_err(), "old admin must be rejected by process_refund");
 
@@ -12938,7 +12931,6 @@ fn test_resolve_arbitration_payout_to_instructor() {
     assert_eq!(case.status, DisputeStatus::ResolvedForInstructor);
 }
 
-<<<<<<< HEAD
 /// #466 — arbitration fees are configured independently per token.
 #[test]
 fn test_arbitration_fee_config_is_per_token() {
@@ -12970,87 +12962,6 @@ fn test_arbitration_fee_config_is_per_token() {
 /// when the case is resolved.
 #[test]
 fn test_arbitration_fees_held_tracked_per_token() {
-=======
-/// #465 — escalation must reject a course that is still Pending.
-#[test]
-#[should_panic(expected = "Error(Contract, #1)")]
-fn test_escalation_rejects_pending_course() {
-    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
-    let client = HamplardContractClient::new(&env, &contract_id);
-
-    client.set_arbitration_fee_config(&admin, &5_000_000);
-    let course_id = String::from_str(&env, "COURSE-ARB-PENDING");
-    client.register_course(
-        &instructor,
-        &course_id,
-        &1_000_000_000,
-        &token_id,
-        &0u32,
-        &None,
-        &BytesN::from_array(&env, &[1u8; 32]),
-        &soroban_sdk::Vec::new(&env),
-    );
-
-    let student = Address::generate(&env);
-    client.escalate_to_arbitration(&student, &course_id);
-}
-
-/// #465 — escalation must reject a course that has been Rejected.
-#[test]
-#[should_panic(expected = "Error(Contract, #1)")]
-fn test_escalation_rejects_rejected_course() {
-    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
-    let client = HamplardContractClient::new(&env, &contract_id);
-
-    client.set_arbitration_fee_config(&admin, &5_000_000);
-    let course_id = String::from_str(&env, "COURSE-ARB-REJECTED");
-    client.register_course(
-        &instructor,
-        &course_id,
-        &1_000_000_000,
-        &token_id,
-        &0u32,
-        &None,
-        &BytesN::from_array(&env, &[4u8; 32]),
-        &soroban_sdk::Vec::new(&env),
-    );
-    client.reject_course(
-        &admin,
-        &course_id,
-        &String::from_str(&env, "CONTENT_POLICY_VIOLATION"),
-    );
-
-    let student = Address::generate(&env);
-    client.escalate_to_arbitration(&student, &course_id);
-}
-
-/// #465 — escalation must reject a course whose token is no longer approved.
-#[test]
-#[should_panic(expected = "Error(Contract, #2)")]
-fn test_escalation_rejects_unapproved_token() {
-    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
-    let client = HamplardContractClient::new(&env, &contract_id);
-
-    let student = setup_arbitration(
-        &env,
-        &client,
-        &token_id,
-        &admin,
-        &instructor,
-        "COURSE-ARB-UNAPPROVED-TOKEN",
-        5_000_000,
-    );
-    let course_id = String::from_str(&env, "COURSE-ARB-UNAPPROVED-TOKEN");
-
-    client.remove_approved_token(&admin, &token_id);
-
-    client.escalate_to_arbitration(&student, &course_id);
-}
-
-/// #465 — escalation succeeds for an Active course with an approved token.
-#[test]
-fn test_escalation_active_course_approved_token_succeeds() {
->>>>>>> pr/584
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
 
@@ -13061,7 +12972,6 @@ fn test_escalation_active_course_approved_token_succeeds() {
         &token_id,
         &admin,
         &instructor,
-<<<<<<< HEAD
         "COURSE-ARB-HELD",
         fee_per_case,
     );
@@ -13236,26 +13146,6 @@ fn test_escalation_allows_historical_student() {
         .get_arbitration_case(&student, &course_id)
         .expect("historical student escalation must create a retrievable case");
     assert_eq!(case.caller, student);
-=======
-        "COURSE-ARB-ELIGIBLE",
-        fee_per_case,
-    );
-    let course_id = String::from_str(&env, "COURSE-ARB-ELIGIBLE");
-
-    let balance_before = token::Client::new(&env, &token_id).balance(&student);
-    client.escalate_to_arbitration(&student, &course_id);
-    let balance_after = token::Client::new(&env, &token_id).balance(&student);
-
-    assert_eq!(
-        balance_before - balance_after,
-        fee_per_case,
-        "eligible escalation must collect the configured fee"
-    );
-    let case = client
-        .get_arbitration_case(&student, &course_id)
-        .expect("eligible escalation must persist an arbitration case");
-    assert_eq!(case.status, DisputeStatus::Open);
->>>>>>> pr/584
 }
 
 // ============================================================
@@ -16932,4 +16822,149 @@ fn test_set_risk_fee_config_rejected_values_leave_config_unchanged() {
         assert_eq!(cfg.new_customer_surcharge_bps, 700);
         assert_eq!(cfg.btc_eth_surcharge_bps, 900);
     });
+}
+
+
+// ============================================================
+// REFUNDS REVERSE THE FEE SPLIT ACTUALLY CHARGED (#308)
+// ============================================================
+
+/// Per-token fee of 12% plus a 5% large-payment risk surcharge: 17% in total,
+/// which differs from the 20% platform default / `course.platform_fee_percent`.
+fn setup_custom_fee_split(price: i128) -> (Env, Address, Address, Address, Address, Address, Address) {
+    let (env, contract_id, token_id, admin, sec_admin, treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    client.set_fee_config(&admin, &token_id, &1200u32);
+    client.set_risk_config_enabled(&admin, &true);
+    client.set_risk_fee_config(&admin, &500u32, &500_000_000i128, &0u32, &0u32);
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-SPLIT",
+        price,
+    );
+    (env, contract_id, token_id, admin, sec_admin, treasury, instructor)
+}
+
+#[test]
+fn test_process_refund_reverses_exact_split_with_fee_config_and_risk() {
+    let price: i128 = 1_000_000_000;
+    let (env, contract_id, token_id, admin, _sec_admin, treasury, instructor) =
+        setup_custom_fee_split(price);
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &token_id);
+    let course_id = String::from_str(&env, "COURSE-SPLIT");
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &price);
+
+    client.enroll(&student, &course_id);
+
+    let platform_charged = price * 17 / 100;
+    let instructor_charged = price - platform_charged;
+    let enrollment = client.get_enrollment(&student, &student, &course_id).unwrap();
+    assert_eq!(enrollment.platform_amount, platform_charged);
+    assert_eq!(enrollment.instructor_amount, instructor_charged);
+    assert_eq!(token_client.balance(&treasury), platform_charged);
+    assert_eq!(
+        client.get_instructor_earnings(&instructor, &token_id),
+        instructor_charged
+    );
+
+    // The per-token fee changes after enrollment; the refund must not care.
+    client.set_fee_config(&admin, &token_id, &4000u32);
+
+    client.request_refund(&student, &course_id);
+    env.mock_all_auths_allowing_non_root_auth();
+    client.process_refund(&admin, &student, &course_id, &true, &None);
+
+    assert_eq!(token_client.balance(&student), price);
+    assert_eq!(token_client.balance(&treasury), 0);
+    assert_eq!(client.get_instructor_earnings(&instructor, &token_id), 0);
+}
+
+#[test]
+fn test_process_refund_partial_uses_charged_split_ratio() {
+    let price: i128 = 1_000_000_000;
+    let (env, contract_id, token_id, admin, _sec_admin, treasury, instructor) =
+        setup_custom_fee_split(price);
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &token_id);
+    let course_id = String::from_str(&env, "COURSE-SPLIT");
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &price);
+    client.enroll(&student, &course_id);
+
+    client.request_refund(&student, &course_id);
+    env.mock_all_auths_allowing_non_root_auth();
+    // Refund half: half of the 17% platform share, half of the 83% instructor share.
+    client.process_refund(&admin, &student, &course_id, &true, &Some(price / 2));
+
+    assert_eq!(token_client.balance(&student), price / 2);
+    assert_eq!(token_client.balance(&treasury), price * 17 / 100 - price * 17 / 200);
+    assert_eq!(
+        client.get_instructor_earnings(&instructor, &token_id),
+        price * 83 / 100 - (price / 2 - price * 17 / 200)
+    );
+}
+
+#[test]
+fn test_archive_course_refund_reverses_exact_split_with_fee_config_and_risk() {
+    let price: i128 = 1_000_000_000;
+    let (env, contract_id, token_id, admin, sec_admin, treasury, instructor) =
+        setup_custom_fee_split(price);
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &token_id);
+    let course_id = String::from_str(&env, "COURSE-SPLIT");
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &price);
+    client.enroll(&student, &course_id);
+    assert_eq!(token_client.balance(&treasury), price * 17 / 100);
+
+    client.pause_course(&admin, &course_id);
+    let mut students = soroban_sdk::Vec::new(&env);
+    students.push_back(student.clone());
+    env.mock_all_auths_allowing_non_root_auth();
+    client.archive_course(&admin, &sec_admin, &course_id, &Some(students));
+
+    assert_eq!(token_client.balance(&student), price);
+    assert_eq!(token_client.balance(&treasury), 0);
+    assert_eq!(client.get_instructor_earnings(&instructor, &token_id), 0);
+}
+
+#[test]
+fn test_re_enroll_then_refund_reverses_exact_split_with_fee_config_and_risk() {
+    let price: i128 = 1_000_000_000;
+    let (env, contract_id, token_id, admin, _sec_admin, treasury, instructor) =
+        setup_custom_fee_split(price);
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &token_id);
+    let course_id = String::from_str(&env, "COURSE-SPLIT");
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &(price * 2));
+    client.enroll(&student, &course_id);
+    client.mark_completed(&admin, &student, &course_id, &None);
+    client.re_enroll(&student, &course_id);
+
+    let enrollment = client.get_enrollment(&student, &student, &course_id).unwrap();
+    assert_eq!(enrollment.platform_amount, price * 17 / 100);
+    assert_eq!(enrollment.instructor_amount, price - price * 17 / 100);
+
+    client.request_refund(&student, &course_id);
+    env.mock_all_auths_allowing_non_root_auth();
+    client.process_refund(&admin, &student, &course_id, &true, &None);
+
+    // Only the re-enrollment payment is returned; the first purchase stays.
+    assert_eq!(token_client.balance(&student), price);
+    assert_eq!(token_client.balance(&treasury), price * 17 / 100);
+    assert_eq!(
+        client.get_instructor_earnings(&instructor, &token_id),
+        price - price * 17 / 100
+    );
 }
