@@ -1,4 +1,4 @@
-﻿# Hamplard — Contract Repo
+# Hamplard — Contract Repo
 
 > **On-chain course enrollment, payments, and certificate issuance on Stellar Soroban**
 
@@ -75,6 +75,8 @@ When a student enrolls, the contract automatically splits the payment in a singl
 - Instructor share → instructor address directly
 
 No escrow needed — the payment splits and lands in both wallets immediately. The contract records the enrollment so no student can enroll twice.
+
+Enrollment is **price-protected**: `enroll()`, `batch_enroll()` and `re_enroll()` take a `max_price` argument, and the call reverts if the course's current price is higher. A student therefore can never be charged more than the price they saw when they signed, even if an instructor changes the price between the quote and execution.
 
 **3. On-Chain Certificates**
 After a student completes a course (verified off-chain by the backend), the admin issues an on-chain certificate. Each certificate is a permanent, verifiable record tied to the student's Stellar address and the course. Anyone can verify a certificate by querying `verify_certificate(certificate_id)` — no trusted middleman needed. Certificates can be revoked by the admin if issued in error.
@@ -204,7 +206,9 @@ Initialises the contract. Called once by the deployer.
 
 | Function | Caller | Description |
 |---|---|---|
-| `enroll(student, course_id)` | Student | Pay and enroll. Splits payment instantly. |
+| `enroll(student, course_id, max_price)` | Student | Pay and enroll. Splits payment instantly. Reverts if the current price exceeds `max_price`. |
+| `batch_enroll(student, course_ids, max_price)` | Student | Enroll in several courses atomically. `max_price` is the per-course limit; the whole batch reverts if any course exceeds it. |
+| `re_enroll(student, course_id, max_price)` | Student | Re-enroll after completion. Reverts if the current price exceeds `max_price`. |
 
 ### Completion & Certificates
 
@@ -437,6 +441,7 @@ stellar contract invoke \
 
 - **Authorization**: Every write function calls `require_auth()` on the relevant party. Instructors cannot approve their own courses. Students cannot issue their own certificates. Only the admin can revoke certificates.
 - **No double enrollment**: The contract checks for an existing enrollment record before processing payment. A student cannot be charged twice for the same course.
+- **Price protection**: `enroll()`, `batch_enroll()` and `re_enroll()` require a `max_price` and revert if the course's current price exceeds it, so a price change between a student's quote and execution cannot charge them more than they approved.
 - **Atomic payment split**: Both the platform and instructor transfers happen in the same transaction. There is no intermediate escrow that could be exploited.
 - **Certificate immutability**: Revoked certificates are flagged — not deleted. This preserves the audit trail and prevents a revocation from being hidden.
 - **Admin is a single address**: For production, consider using a multi-sig wallet as the admin address to avoid a single point of failure.

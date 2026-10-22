@@ -352,7 +352,7 @@ fn test_enroll_success_with_payment_split() {
 
     let student_balance_before = token_client.balance(&student);
 
-    client.enroll(&student, &String::from_str(&env, "COURSE-FASHION-001"));
+    client.enroll(&student, &String::from_str(&env, "COURSE-FASHION-001"), &i128::MAX);
 
     // Check payment split: 20% to treasury, 80% credited as instructor earnings
     let platform_share = price * 20 / 100; // 200_000_000
@@ -412,7 +412,7 @@ fn test_enroll_rejects_before_enrollment_start_ledger() {
     let enrollment_start = env.ledger().sequence() + 10;
     client.set_enrollment_start_ledger(&instructor, &course_id, &Some(enrollment_start));
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 }
 
 #[test]
@@ -440,7 +440,7 @@ fn test_enroll_succeeds_at_enrollment_start_ledger() {
         l.sequence_number = enrollment_start;
     });
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     let enrollment = client
         .get_enrollment(&student, &student, &course_id)
@@ -474,8 +474,8 @@ fn test_enroll_succeeds_when_instructor_is_contract_address() {
 
     client.enroll(
         &student,
-        &String::from_str(&env, "COURSE-CONTRACT-INSTRUCTOR-001"),
-    );
+        &String::from_str(&env, "COURSE-CONTRACT-INSTRUCTOR-001"),,
+            &i128::MAX);
 
     let platform_share = price * 20 / 100;
     let instructor_share = price - platform_share;
@@ -520,7 +520,7 @@ fn test_enroll_uses_registered_course_fee_when_default_fee_changes() {
     env.ledger().with_mut(|l| {
         l.sequence_number += 1;
     });
-    client.enroll(&student, &String::from_str(&env, "COURSE-FEE-UPDATE-001"));
+    client.enroll(&student, &String::from_str(&env, "COURSE-FEE-UPDATE-001"), &i128::MAX);
 
     // Platform fee should now be 35% (new default), not 20%
     let platform_share = price * 35 / 100;
@@ -568,7 +568,7 @@ fn test_enroll_fee_honors_registered_override_as_floor() {
     env.ledger().with_mut(|l| {
         l.sequence_number += 1;
     });
-    client.enroll(&student, &String::from_str(&env, "COURSE-CUSTOM-FEE"));
+    client.enroll(&student, &String::from_str(&env, "COURSE-CUSTOM-FEE"), &i128::MAX);
 
     // Platform fee should be 40% (registered override), not 10% (live
     // default): the rate validated at register_course() is the rate charged.
@@ -601,7 +601,7 @@ fn test_enroll_zero_price_free_course() {
     );
 
     // Enroll should succeed and no transfers should be attempted
-    client.enroll(&student, &String::from_str(&env, "COURSE-FREE-001"));
+    client.enroll(&student, &String::from_str(&env, "COURSE-FREE-001"), &i128::MAX);
 
     let enrollment = client
         .get_enrollment(
@@ -663,7 +663,7 @@ fn test_enroll_fee_overflow() {
     client.update_default_fee(&admin, &100u32);
 
     // This enroll should panic due to overflow in fee calculation
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 }
 
 #[test]
@@ -686,8 +686,8 @@ fn test_enroll_duplicate() {
     );
 
     let course_id = String::from_str(&env, "COURSE-PHOTO-001");
-    client.enroll(&student, &course_id);
-    client.enroll(&student, &course_id); // second enroll — should panic
+    client.enroll(&student, &course_id, &i128::MAX);
+    client.enroll(&student, &course_id, &i128::MAX); // second enroll — should panic
 }
 
 #[test]
@@ -709,7 +709,7 @@ fn test_enroll_admin_rejected() {
     );
 
     let course_id = String::from_str(&env, "COURSE-PHOTO-001");
-    client.enroll(&admin, &course_id); // should panic
+    client.enroll(&admin, &course_id, &i128::MAX); // should panic
 }
 
 #[test]
@@ -735,7 +735,7 @@ fn test_enrollment_receipt_event_emitted_with_payment_breakdown() {
     let course_id = String::from_str(&env, "COURSE-EVENT-001");
     let ledger_before = env.ledger().sequence();
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // Verify enrollment event was emitted with correct payment breakdown
     let events = env.events().all();
@@ -809,7 +809,7 @@ fn test_enroll_pending_course() {
         &soroban_sdk::Vec::new(&env),
     );
 
-    client.enroll(&student, &String::from_str(&env, "COURSE-PENDING"));
+    client.enroll(&student, &String::from_str(&env, "COURSE-PENDING"), &i128::MAX);
 }
 
 #[test]
@@ -837,7 +837,7 @@ fn test_enroll_same_ledger_as_registration_rejected() {
     // Enrolling in the very same ledger the course was registered in must
     // be rejected, even though the course is already Active — a review
     // delay of at least one ledger sequence is required.
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 }
 
 #[test]
@@ -860,7 +860,7 @@ fn test_instructor_self_enrollment_rejected() {
     );
 
     // Instructor tries to enroll in their own course — must be rejected
-    client.enroll(&instructor, &String::from_str(&env, "COURSE-SELF-ENROLL"));
+    client.enroll(&instructor, &String::from_str(&env, "COURSE-SELF-ENROLL"), &i128::MAX);
 }
 
 #[test]
@@ -884,7 +884,7 @@ fn test_is_enrolled_check() {
     let course_id = String::from_str(&env, "COURSE-LASH-001");
     assert!(!client.is_enrolled(&student, &course_id));
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     assert!(client.is_enrolled(&student, &course_id));
 }
 
@@ -917,7 +917,7 @@ fn test_full_lifecycle_enroll_complete_certify() {
     assert_eq!(client.has_completed(&student, &course_id), None);
 
     // Enroll
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     assert_eq!(client.has_completed(&student, &course_id), Some(false));
 
     // Mark completed
@@ -976,7 +976,7 @@ fn test_certificate_issued_event_contains_full_issuance_details() {
         500_000_000,
     );
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -1047,7 +1047,7 @@ fn test_certificate_requires_completion() {
         400_000_000,
     );
 
-    client.enroll(&student, &String::from_str(&env, "COURSE-NAILS-001"));
+    client.enroll(&student, &String::from_str(&env, "COURSE-NAILS-001"), &i128::MAX);
 
     // Try to issue certificate without completing — should panic
     client.issue_certificate(
@@ -1083,7 +1083,7 @@ fn test_revoke_certificate() {
     let course_id = String::from_str(&env, "COURSE-MAKEUP-001");
     let cert_id = String::from_str(&env, "CERT-REVOKE-TEST");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -1146,7 +1146,7 @@ fn test_event_certificate_revoked() {
     let course_id = String::from_str(&env, "COURSE-EVENT-REVOKE");
     let cert_id = String::from_str(&env, "CERT-REVOKE-123");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -1234,7 +1234,7 @@ fn test_revoke_certificate_metadata_persisted() {
     let course_id = String::from_str(&env, "COURSE-AUDIT-001");
     let cert_id = String::from_str(&env, "CERT-AUDIT-TEST");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -1295,7 +1295,7 @@ fn test_issue_certificate_with_instructor_signature() {
     let course_id = String::from_str(&env, "COURSE-SIGNED-001");
     let cert_id = String::from_str(&env, "CERT-SIGNED-001");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -1340,7 +1340,7 @@ fn test_issue_certificate_without_instructor_signature() {
     let course_id = String::from_str(&env, "COURSE-UNSIGNED-001");
     let cert_id = String::from_str(&env, "CERT-UNSIGNED-001");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -1450,7 +1450,7 @@ fn test_multiple_students_same_course() {
     for _ in 0..5 {
         let s = Address::generate(&env);
         asset_client.mint(&s, &1_000_000_000);
-        client.enroll(&s, &course_id);
+        client.enroll(&s, &course_id, &i128::MAX);
     }
 
     let course = client.get_course(&course_id).unwrap();
@@ -1492,8 +1492,8 @@ fn test_instructor_total_earnings_across_courses() {
         600_000_000,
     );
 
-    client.enroll(&student_a, &String::from_str(&env, "COURSE-TOTAL-1"));
-    client.enroll(&student_b, &String::from_str(&env, "COURSE-TOTAL-2"));
+    client.enroll(&student_a, &String::from_str(&env, "COURSE-TOTAL-1"), &i128::MAX);
+    client.enroll(&student_b, &String::from_str(&env, "COURSE-TOTAL-2"), &i128::MAX);
 
     let price1: i128 = 400_000_000;
     let price2: i128 = 600_000_000;
@@ -1534,7 +1534,7 @@ fn test_mark_completed_no_evidence_requires_student_auth() {
         100_000_000,
     );
     let course_id = String::from_str(&env, "COURSE-AUTH-1");
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // Call mark_completed with None.
     client.mark_completed(&admin, &student, &course_id, &None);
@@ -1572,7 +1572,7 @@ fn test_mark_completed_with_evidence_does_not_require_student_auth() {
         100_000_000,
     );
     let course_id = String::from_str(&env, "COURSE-AUTH-2");
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // Call mark_completed with evidence hash.
     let hash = evidence_hash(&env, "some_evidence_hash");
@@ -1619,7 +1619,7 @@ fn test_mark_completed_rejects_mismatched_enrollment_course_id() {
         "COURSE-COMPLETE-MISMATCH",
         100_000_000,
     );
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     let mut enrollment = client
         .get_enrollment(&admin, &student, &course_id)
@@ -1659,7 +1659,7 @@ fn test_archive_course_blocked_by_active_enrollment() {
         100_000_000,
     );
     let course_id = String::from_str(&env, "COURSE-ARCHIVE-1");
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // Try to archive an Active course — must be Paused first
     client.archive_course(&admin, &sec_admin, &course_id, &None);
@@ -1689,8 +1689,8 @@ fn test_archive_course_with_refunds() {
     );
     let course_id = String::from_str(&env, "COURSE-REFUND");
 
-    client.enroll(&student_a, &course_id);
-    client.enroll(&student_b, &course_id);
+    client.enroll(&student_a, &course_id, &i128::MAX);
+    client.enroll(&student_b, &course_id, &i128::MAX);
 
     assert_eq!(token_client.balance(&student_a), 500_000_000);
     assert_eq!(token_client.balance(&student_b), 500_000_000);
@@ -1756,7 +1756,7 @@ fn test_archive_course_incremental_refunds() {
     let course_id = String::from_str(&env, "COURSE-INCREMENTAL-REFUND");
 
     for student in &students {
-        client.enroll(student, &course_id);
+        client.enroll(student, &course_id, &i128::MAX);
     }
 
     client.pause_course(&admin, &course_id);
@@ -1845,7 +1845,7 @@ fn test_enroll_insufficient_funds_rollback() {
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &150_000_000);
 
     // Enroll should panic because instructor transfer will fail
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // Verify treasury didn't receive any tokens (rollback proof)
     assert_eq!(token_client.balance(&treasury), 0);
@@ -1882,7 +1882,7 @@ fn test_treasury_update_delay() {
     client.update_treasury(&admin, &sec_admin, &new_treasury);
 
     // Enroll student_1 immediately - fee should still go to the old treasury
-    client.enroll(&student_1, &course_id);
+    client.enroll(&student_1, &course_id, &i128::MAX);
     let platform_fee = price * 20 / 100;
     assert_eq!(token_client.balance(&treasury), platform_fee);
     assert_eq!(token_client.balance(&new_treasury), 0);
@@ -1893,7 +1893,7 @@ fn test_treasury_update_delay() {
     });
 
     // Enroll student_2 - fee should now go to the new treasury
-    client.enroll(&student_2, &course_id);
+    client.enroll(&student_2, &course_id, &i128::MAX);
     assert_eq!(token_client.balance(&treasury), platform_fee); // unchanged
     assert_eq!(token_client.balance(&new_treasury), platform_fee); // new treasury receives it
 }
@@ -1969,7 +1969,7 @@ fn test_issue_certificate_title_too_long() {
         100_000_000,
     );
     let course_id = String::from_str(&env, "COURSE-TITLE-LEN");
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -2008,7 +2008,7 @@ fn test_issue_certificate_id_too_long() {
         100_000_000,
     );
     let course_id = String::from_str(&env, "COURSE-CERT-ID-LEN");
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -2230,7 +2230,7 @@ fn test_enroll_with_non_whitelisted_token_fails() {
     });
 
     // Enrollment must fail because the token is not whitelisted
-    client.enroll(&student, &String::from_str(&env, "COURSE-EVIL-TOKEN"));
+    client.enroll(&student, &String::from_str(&env, "COURSE-EVIL-TOKEN"), &i128::MAX);
 }
 
 #[test]
@@ -2255,7 +2255,7 @@ fn test_enroll_succeeds_after_token_removed_from_whitelist_is_re_added() {
 
     let student = Address::generate(&env);
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &1_000_000_000);
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     assert!(client.is_enrolled(&student, &course_id));
 }
 
@@ -2295,7 +2295,7 @@ fn test_certificate_id_collision_across_courses() {
     // Student A completes course A and receives cert
     let student_a = Address::generate(&env);
     token::StellarAssetClient::new(&env, &token_id).mint(&student_a, &1_000_000_000);
-    client.enroll(&student_a, &course_a);
+    client.enroll(&student_a, &course_a, &i128::MAX);
     client.mark_completed(
         &admin,
         &student_a,
@@ -2316,7 +2316,7 @@ fn test_certificate_id_collision_across_courses() {
     // Student B completes course B — attempt to reuse the same cert ID must fail
     let student_b = Address::generate(&env);
     token::StellarAssetClient::new(&env, &token_id).mint(&student_b, &1_000_000_000);
-    client.enroll(&student_b, &course_b);
+    client.enroll(&student_b, &course_b, &i128::MAX);
     client.mark_completed(
         &admin,
         &student_b,
@@ -2446,7 +2446,7 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
 
     // New admin approves for real so downstream calls have an active course.
     client.approve_course(&new_admin, &course_id);
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // mark_completed — old admin must be rejected
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -2547,7 +2547,7 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
         l.sequence_number += 1;
     });
     client.approve_course(&new_admin, &refund_course_id);
-    client.enroll(&refund_student, &refund_course_id);
+    client.enroll(&refund_student, &refund_course_id, &i128::MAX);
     client.request_refund(&refund_student, &refund_course_id);
 
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -2631,7 +2631,7 @@ fn test_get_enrollment_returns_none_after_ttl_expiry() {
     let course_id = String::from_str(&env, "COURSE-TTL-EXPIRY");
 
     // Enroll the student — record is written with PERSISTENT_TTL_EXTEND_TO ledgers of TTL.
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // Confirm the record exists before simulating expiry.
     let before = client.get_enrollment(&student, &student, &course_id);
@@ -2674,7 +2674,7 @@ fn test_enrollment_persists_after_long_ledger_advance() {
         100_000_000,
     );
     let course_id = String::from_str(&env, "COURSE-TTL-001");
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // Advance ledger well beyond the old 100_000 minimum TTL threshold
     env.ledger().with_mut(|l| {
@@ -2709,7 +2709,7 @@ fn test_enrollment_ttl_extended_on_write() {
         200_000_000,
     );
     let course_id = String::from_str(&env, "COURSE-TTL-002");
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     env.ledger().with_mut(|l| {
         l.sequence_number += 5_000_000;
@@ -2772,7 +2772,7 @@ fn test_batch_enroll_success() {
     course_ids.push_back(String::from_str(&env, "COURSE-BATCH-B"));
     course_ids.push_back(String::from_str(&env, "COURSE-BATCH-C"));
 
-    client.batch_enroll(&student, &course_ids);
+    client.batch_enroll(&student, &course_ids, &i128::MAX);
 
     assert!(client.is_enrolled(&student, &String::from_str(&env, "COURSE-BATCH-A")));
     assert!(client.is_enrolled(&student, &String::from_str(&env, "COURSE-BATCH-B")));
@@ -2814,7 +2814,7 @@ fn test_batch_enroll_fails_on_invalid_course() {
     course_ids.push_back(String::from_str(&env, "COURSE-BATCH-OK"));
     course_ids.push_back(String::from_str(&env, "COURSE-BATCH-BAD"));
 
-    client.batch_enroll(&student, &course_ids);
+    client.batch_enroll(&student, &course_ids, &i128::MAX);
 
     // Must not reach here — if panic didn't happen, no partial state
     assert!(!client.is_enrolled(&student, &String::from_str(&env, "COURSE-BATCH-OK")));
@@ -2844,7 +2844,7 @@ fn test_batch_enroll_rejects_duplicates() {
     course_ids.push_back(course_id.clone());
     course_ids.push_back(course_id);
 
-    client.batch_enroll(&student, &course_ids);
+    client.batch_enroll(&student, &course_ids, &i128::MAX);
 }
 
 #[test]
@@ -2873,7 +2873,7 @@ fn test_batch_enroll_large_unique_batch_succeeds() {
         course_ids.push_back(String::from_str(&env, &course_id));
     }
 
-    client.batch_enroll(&student, &course_ids);
+    client.batch_enroll(&student, &course_ids, &i128::MAX);
 
     for i in 0..batch_size {
         let course_id = format!("COURSE-BATCH-LINEAR-{}", i);
@@ -2910,7 +2910,7 @@ fn test_batch_enroll_rejects_duplicate_in_large_batch() {
     // Duplicate the first ID at the end of an otherwise-max-sized batch.
     course_ids.push_back(String::from_str(&env, "COURSE-BATCH-DUP-LARGE-0"));
 
-    client.batch_enroll(&student, &course_ids);
+    client.batch_enroll(&student, &course_ids, &i128::MAX);
 }
 
 #[test]
@@ -2947,7 +2947,7 @@ fn test_batch_enroll_emits_event_for_each_enrollment() {
     course_ids.push_back(String::from_str(&env, "COURSE-EVENT-A"));
     course_ids.push_back(String::from_str(&env, "COURSE-EVENT-B"));
 
-    let total_paid = client.batch_enroll(&student, &course_ids);
+    let total_paid = client.batch_enroll(&student, &course_ids, &i128::MAX);
     assert_eq!(total_paid, price_a + price_b);
 
     // Verify that two per-course events and one batch summary were emitted.
@@ -3032,7 +3032,7 @@ fn test_mark_completed_unauthorized_includes_operation() {
     );
 
     let course_id = String::from_str(&env, "COURSE-COMPLETE-UNAUTH");
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // Instructor (not admin) tries to mark as completed — should panic with operation name
     client.mark_completed(&instructor, &student, &course_id, &None);
@@ -3145,7 +3145,7 @@ fn test_revoke_certificate_unauthorized_includes_operation() {
     );
 
     let course_id = String::from_str(&env, "COURSE-REVOKE-UNAUTH");
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(&admin, &student, &course_id, &None);
     let cert_id = String::from_str(&env, "CERT-REVOKE-UNAUTH-001");
     let course_title = String::from_str(&env, "Revoke Test Course");
@@ -3193,7 +3193,7 @@ fn test_instructor_earnings_accumulate_and_withdraw() {
     );
     let course_id = String::from_str(&env, "COURSE-EARN-001");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     let instructor_share = price * 80 / 100;
     assert_eq!(
@@ -3228,7 +3228,7 @@ fn test_multiple_enrollments_aggregate_earnings() {
     for _ in 0..3 {
         let s = Address::generate(&env);
         asset_client.mint(&s, &1_000_000_000);
-        client.enroll(&s, &course_id);
+        client.enroll(&s, &course_id, &i128::MAX);
     }
 
     let instructor_share_per = price * 80 / 100;
@@ -3256,7 +3256,7 @@ fn test_unauthorized_instructor_withdraw_fails() {
         "COURSE-EARN-AUTH",
         500_000_000,
     );
-    client.enroll(&student, &String::from_str(&env, "COURSE-EARN-AUTH"));
+    client.enroll(&student, &String::from_str(&env, "COURSE-EARN-AUTH"), &i128::MAX);
 
     let impostor = Address::generate(&env);
     client.withdraw_earnings(&impostor, &token_id, &100, &None);
@@ -3280,7 +3280,7 @@ fn test_double_withdrawal_prevented() {
         "COURSE-EARN-DBL",
         500_000_000,
     );
-    client.enroll(&student, &String::from_str(&env, "COURSE-EARN-DBL"));
+    client.enroll(&student, &String::from_str(&env, "COURSE-EARN-DBL"), &i128::MAX);
 
     client.withdraw_earnings(&instructor, &token_id, &0, &None);
     let balance_after_first = token_client.balance(&instructor);
@@ -3319,7 +3319,7 @@ fn enroll_one(
         course,
         500_000_000,
     );
-    client.enroll(&student, &String::from_str(env, course));
+    client.enroll(&student, &String::from_str(env, course), &i128::MAX);
     500_000_000 * 80 / 100
 }
 
@@ -3690,7 +3690,7 @@ fn test_verify_certificate_returns_true_for_valid_cert() {
     let course_id = String::from_str(&env, "COURSE-VERIFY-001");
     let cert_id = String::from_str(&env, "CERT-VERIFY-001");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -3732,7 +3732,7 @@ fn test_verify_certificate_returns_false_for_revoked_cert() {
     let course_id = String::from_str(&env, "COURSE-VERIFY-002");
     let cert_id = String::from_str(&env, "CERT-VERIFY-002");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -3800,7 +3800,7 @@ fn test_verify_certificate_false_does_not_mutate_state() {
     let course_id = String::from_str(&env, "COURSE-VERIFY-003");
     let cert_id = String::from_str(&env, "CERT-VERIFY-003");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -3862,7 +3862,7 @@ fn test_enroll_at_capacity_succeeds() {
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &1_000_000_000);
 
     // Enrolling the first (and only allowed) student must succeed
-    client.enroll(&student, &String::from_str(&env, "COURSE-CAP-EXACT"));
+    client.enroll(&student, &String::from_str(&env, "COURSE-CAP-EXACT"), &i128::MAX);
 
     let course = client
         .get_course(&String::from_str(&env, "COURSE-CAP-EXACT"))
@@ -3898,8 +3898,8 @@ fn test_enroll_beyond_capacity_rejected() {
     token::StellarAssetClient::new(&env, &token_id).mint(&student_b, &1_000_000_000);
 
     let course_id = String::from_str(&env, "COURSE-CAP-FULL");
-    client.enroll(&student_a, &course_id); // fills the one seat
-    client.enroll(&student_b, &course_id); // must panic
+    client.enroll(&student_a, &course_id, &i128::MAX); // fills the one seat
+    client.enroll(&student_b, &course_id, &i128::MAX); // must panic
 }
 
 #[test]
@@ -3930,7 +3930,7 @@ fn test_enroll_unlimited_capacity() {
     for _ in 0..5 {
         let s = Address::generate(&env);
         asset_client.mint(&s, &1_000_000_000);
-        client.enroll(&s, &course_id);
+        client.enroll(&s, &course_id, &i128::MAX);
     }
 
     let course = client.get_course(&course_id).unwrap();
@@ -3976,8 +3976,8 @@ fn test_batch_enroll_respects_capacity() {
     token::StellarAssetClient::new(&env, &token_id).mint(&first_student, &1_000_000_000);
     client.enroll(
         &first_student,
-        &String::from_str(&env, "COURSE-BATCH-CAP-FULL"),
-    );
+        &String::from_str(&env, "COURSE-BATCH-CAP-FULL"),,
+            &i128::MAX);
 
     let student = Address::generate(&env);
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &1_000_000_000);
@@ -3987,7 +3987,7 @@ fn test_batch_enroll_respects_capacity() {
     course_ids.push_back(String::from_str(&env, "COURSE-BATCH-CAP-FULL"));
 
     // batch_enroll validates all courses before enrolling any — must panic
-    client.batch_enroll(&student, &course_ids);
+    client.batch_enroll(&student, &course_ids, &i128::MAX);
 }
 
 #[test]
@@ -4022,7 +4022,7 @@ fn test_batch_enroll_rejects_oversized_batch() {
         ));
     }
 
-    client.batch_enroll(&student, &course_ids);
+    client.batch_enroll(&student, &course_ids, &i128::MAX);
 }
 
 #[test]
@@ -4053,7 +4053,7 @@ fn test_enroll_total_earned_overflow() {
         env.storage().persistent().set(&course_key, &course);
     });
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 }
 
 #[test]
@@ -4151,7 +4151,7 @@ fn test_get_enrollment_authorized_access() {
         100_000_000,
     );
     let course_id = String::from_str(&env, "COURSE-AUTH-GET");
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // Student can access
     let enrollment = client
@@ -4189,7 +4189,7 @@ fn test_get_enrollment_unauthorized_access() {
         100_000_000,
     );
     let course_id = String::from_str(&env, "COURSE-AUTH-GET-UNAUTH");
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // Random user cannot access
     client.get_enrollment(&random_user, &student, &course_id);
@@ -4257,7 +4257,7 @@ fn test_concurrent_completion() {
         100_000_000,
     );
     let course_id = String::from_str(&env, "COURSE-CONCURRENCY");
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     client.mark_completed(
         &admin,
@@ -4466,7 +4466,7 @@ fn test_course_certificate_id_collision_verification() {
     });
 
     // Enroll and complete
-    client.enroll(&student, &matching_id);
+    client.enroll(&student, &matching_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -4537,7 +4537,7 @@ fn test_certificate_expiry_behavior() {
         "COURSE-EXPIRY",
         100_000_000,
     );
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(&admin, &student, &course_id, &None);
 
     // Issue certificate with expiry at ledger 1000
@@ -4670,7 +4670,7 @@ fn test_blocked_student_cannot_enroll() {
     );
 
     client.block_student(&admin, &student);
-    client.enroll(&student, &String::from_str(&env, "BLOCKED-STUDENT-COURSE"));
+    client.enroll(&student, &String::from_str(&env, "BLOCKED-STUDENT-COURSE"), &i128::MAX);
 }
 
 #[test]
@@ -4718,7 +4718,7 @@ fn test_refund_lifecycle() {
     assert_eq!(client.get_refund_window(), 10u32);
 
     // Enroll
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     assert!(client.is_enrolled(&student, &course_id));
 
     // Request refund
@@ -4762,7 +4762,7 @@ fn test_refund_request_outside_window_fails() {
     let course_id = String::from_str(&env, "COURSE-REFUND-EXP");
     client.update_refund_window(&admin, &5u32);
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // Advance ledger sequence by 6
     env.ledger().with_mut(|l| {
@@ -4791,7 +4791,7 @@ fn test_refund_rejection() {
     );
 
     let course_id = String::from_str(&env, "COURSE-REJECT");
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
@@ -4825,7 +4825,7 @@ fn test_frozen_instructor_enrollment_blocked() {
     client.freeze_instructor(&admin, &instructor);
 
     // Attempting to enroll in the frozen instructor's course must fail
-    client.enroll(&student, &String::from_str(&env, "PRE-FREEZE-COURSE"));
+    client.enroll(&student, &String::from_str(&env, "PRE-FREEZE-COURSE"), &i128::MAX);
 }
 
 // ============================================================
@@ -4853,7 +4853,7 @@ fn test_has_completed_distinguishes_absent_enrollment_from_incomplete() {
 
     assert_eq!(client.has_completed(&student, &course_id), None);
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     assert_eq!(client.has_completed(&student, &course_id), Some(false));
 
     client.mark_completed(
@@ -4885,7 +4885,7 @@ fn test_re_enroll_after_completion_succeeds() {
     );
     let course_id = String::from_str(&env, "COURSE-REENROLL-001");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -4896,7 +4896,7 @@ fn test_re_enroll_after_completion_succeeds() {
 
     let treasury_before = token::Client::new(&env, &token_id).balance(&treasury);
 
-    client.re_enroll(&student, &course_id);
+    client.re_enroll(&student, &course_id, &i128::MAX);
 
     // A fresh, uncompleted enrollment now exists for the same key
     let enrollment = client
@@ -4938,7 +4938,7 @@ fn test_re_enroll_archives_original_completion_and_certificate() {
     let course_id = String::from_str(&env, "COURSE-REENROLL-002");
     let cert_id = String::from_str(&env, "CERT-REENROLL-002");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -4956,7 +4956,7 @@ fn test_re_enroll_archives_original_completion_and_certificate() {
         &None,
     );
 
-    client.re_enroll(&student, &course_id);
+    client.re_enroll(&student, &course_id, &i128::MAX);
 
     // The certificate issued for the original completion is untouched
     assert!(client.verify_certificate(&cert_id));
@@ -5042,7 +5042,7 @@ fn test_events_emitted_for_admin_operations() {
     env.ledger().with_mut(|l| {
         l.sequence_number += 1;
     });
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -5206,7 +5206,7 @@ fn test_re_enroll_without_prior_enrollment_fails() {
     let course_id = String::from_str(&env, "COURSE-REENROLL-003");
 
     // Student never enrolled at all
-    client.re_enroll(&student, &course_id);
+    client.re_enroll(&student, &course_id, &i128::MAX);
 }
 
 #[test]
@@ -5229,9 +5229,9 @@ fn test_re_enroll_before_completion_fails() {
     );
     let course_id = String::from_str(&env, "COURSE-REENROLL-004");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     // Not completed — must panic
-    client.re_enroll(&student, &course_id);
+    client.re_enroll(&student, &course_id, &i128::MAX);
 }
 
 #[test]
@@ -5254,7 +5254,7 @@ fn test_re_enroll_multiple_times_accumulates_history() {
     let course_id = String::from_str(&env, "COURSE-REENROLL-005");
 
     // First attempt: normal enroll, complete, then re-enroll (archives attempt 1)
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -5267,7 +5267,7 @@ fn test_re_enroll_multiple_times_accumulates_history() {
             .len(),
         0
     );
-    client.re_enroll(&student, &course_id);
+    client.re_enroll(&student, &course_id, &i128::MAX);
 
     // Second attempt: re_enroll already created a fresh enrollment — just
     // complete it and re-enroll again (archives attempt 2)
@@ -5283,7 +5283,7 @@ fn test_re_enroll_multiple_times_accumulates_history() {
             .len(),
         1
     );
-    client.re_enroll(&student, &course_id);
+    client.re_enroll(&student, &course_id, &i128::MAX);
 
     let history = client.get_enrollment_history(&student, &student, &course_id);
     assert_eq!(history.len(), 2);
@@ -5312,14 +5312,14 @@ fn test_get_enrollment_history_unauthorized_access() {
     );
     let course_id = String::from_str(&env, "COURSE-REENROLL-006");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
         &course_id,
         &Some(evidence_hash(&env, "evidence")),
     );
-    client.re_enroll(&student, &course_id);
+    client.re_enroll(&student, &course_id, &i128::MAX);
 
     // A random address must not be able to read the history
     client.get_enrollment_history(&random_user, &student, &course_id);
@@ -5410,7 +5410,7 @@ fn test_process_refund_event_includes_admin() {
     );
     let course_id = String::from_str(&env, "COURSE-REFUND-ATTR");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.request_refund(&student, &course_id);
     env.mock_all_auths_allowing_non_root_auth();
     client.process_refund(&admin, &student, &course_id, &true, &None);
@@ -5486,7 +5486,7 @@ fn test_get_certificate_authorized_roles() {
         500_000_000,
     );
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -5539,7 +5539,7 @@ fn test_get_certificate_unauthorized_third_party_fails() {
         500_000_000,
     );
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -5601,7 +5601,7 @@ fn test_certificate_student_b_without_enrollment_panics() {
     let cert_id = String::from_str(&env, "CERT-SECURE-B");
 
     // Enroll and complete student_a only
-    client.enroll(&student_a, &course_id);
+    client.enroll(&student_a, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student_a,
@@ -5646,7 +5646,7 @@ fn test_certificate_student_matches_enrollment() {
     let cert_id = String::from_str(&env, "CERT-SECURE");
 
     // Enroll and complete student_a
-    client.enroll(&student_a, &course_id);
+    client.enroll(&student_a, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student_a,
@@ -5787,7 +5787,7 @@ fn test_mark_completed_before_min_duration_fails() {
     );
     let course_id = String::from_str(&env, "COURSE-MIN-DURATION-1");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // Only 1 ledger has elapsed since enrollment — far short of the 50
     // required — so this must panic.
@@ -5820,7 +5820,7 @@ fn test_mark_completed_after_min_duration_succeeds() {
     );
     let course_id = String::from_str(&env, "COURSE-MIN-DURATION-2");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     env.ledger().with_mut(|l| {
         l.sequence_number += 50;
@@ -5857,7 +5857,7 @@ fn test_mark_completed_default_zero_delay_allows_immediate_completion() {
     );
     let course_id = String::from_str(&env, "COURSE-MIN-DURATION-3");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -5895,7 +5895,7 @@ fn test_enroll_rejected_for_just_paused_course() {
     // Course is paused in the same call frame just before enrollment is
     // attempted — must still be rejected.
     client.pause_course(&admin, &course_id);
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 }
 
 // ============================================================
@@ -5924,7 +5924,7 @@ fn test_issue_certificate_empty_id_rejected() {
     );
 
     let course_id = String::from_str(&env, "COURSE-EMPTY-CERT");
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -5967,7 +5967,7 @@ fn test_revoke_certificate_double_revocation_rejected() {
     );
 
     let course_id = String::from_str(&env, "COURSE-REVOKE-DBL");
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -6020,7 +6020,7 @@ fn test_revoke_certificate_metadata_unchanged_after_rejected_double_revoke() {
 
     let course_id = String::from_str(&env, "COURSE-IMMUTABLE-001");
     let cert_id = String::from_str(&env, "CERT-IMMUTABLE-001");
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -6098,7 +6098,7 @@ fn test_revoke_certificate_id_cannot_be_reused_to_unrevoke() {
     let cert_id = String::from_str(&env, "CERT-REUSE-SHARED");
 
     // Issue and revoke a certificate under course A.
-    client.enroll(&student_a, &course_a);
+    client.enroll(&student_a, &course_a, &i128::MAX);
     client.mark_completed(
         &admin,
         &student_a,
@@ -6120,7 +6120,7 @@ fn test_revoke_certificate_id_cannot_be_reused_to_unrevoke() {
     // A completely unrelated enrollment must not be able to reuse the same
     // certificate ID to create a fresh, non-revoked record — doing so would
     // effectively "un-revoke" the credential under that ID.
-    client.enroll(&student_b, &course_b);
+    client.enroll(&student_b, &course_b, &i128::MAX);
     client.mark_completed(
         &admin,
         &student_b,
@@ -6178,7 +6178,7 @@ fn test_mark_completed_panics_when_enrollment_expired() {
     client.set_enrollment_expiry(&instructor, &course_id, &Some(100u32));
 
     // Student enrolls
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // Advance ledger past the expiry window
     env.ledger().with_mut(|l| {
@@ -6218,7 +6218,7 @@ fn test_has_completed_returns_false_when_enrollment_expired() {
     client.set_enrollment_expiry(&instructor, &course_id, &Some(50u32));
 
     // Student enrolls
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // Before expiry: has_completed should be false (not completed yet)
     assert_ne!(client.has_completed(&student, &course_id), Some(true));
@@ -6256,7 +6256,7 @@ fn test_has_completed_returns_true_when_completed_before_expiry() {
     client.set_enrollment_expiry(&instructor, &course_id, &Some(1000u32));
 
     // Student enrolls and completes within the window
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -6293,7 +6293,7 @@ fn test_enrollment_expiry_none_allows_completion_at_any_time() {
     let course_id = String::from_str(&env, "COURSE-NO-EXPIRY");
 
     // No expiry set (default None) — student enrolls
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // Advance many ledgers
     env.ledger().with_mut(|l| {
@@ -6336,7 +6336,7 @@ fn test_certificate_issued_by_matches_contract_address() {
     let course_id = String::from_str(&env, "COURSE-ISSUED-BY-001");
     let cert_id = String::from_str(&env, "CERT-ISSUED-BY-001");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -6382,7 +6382,7 @@ fn test_certificate_issued_by_is_not_admin_or_instructor() {
     let course_id = String::from_str(&env, "COURSE-ISSUED-BY-002");
     let cert_id = String::from_str(&env, "CERT-ISSUED-BY-002");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -6439,7 +6439,7 @@ fn test_certificate_issued_by_persists_after_revocation() {
     let course_id = String::from_str(&env, "COURSE-ISSUED-BY-003");
     let cert_id = String::from_str(&env, "CERT-ISSUED-BY-003");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -6500,7 +6500,7 @@ fn test_multiple_certificates_share_same_issued_by() {
     let cert_a = String::from_str(&env, "CERT-MULTI-ISSUED-A");
     let cert_b = String::from_str(&env, "CERT-MULTI-ISSUED-B");
 
-    client.enroll(&student_a, &course_a);
+    client.enroll(&student_a, &course_a, &i128::MAX);
     client.mark_completed(
         &admin,
         &student_a,
@@ -6518,7 +6518,7 @@ fn test_multiple_certificates_share_same_issued_by() {
         &None,
     );
 
-    client.enroll(&student_b, &course_b);
+    client.enroll(&student_b, &course_b, &i128::MAX);
     client.mark_completed(
         &admin,
         &student_b,
@@ -6594,7 +6594,7 @@ fn test_refund_request_within_window_succeeds() {
     );
     let course_id = String::from_str(&env, "COURSE-WINDOW-IN");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // Advance well within the window
     env.ledger().with_mut(|l| {
@@ -6631,7 +6631,7 @@ fn test_refund_request_at_window_boundary_succeeds() {
     );
     let course_id = String::from_str(&env, "COURSE-WINDOW-BOUND");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     let enrolled_at = env.ledger().sequence();
 
     // Advance to exactly enrolled_at + window
@@ -6669,7 +6669,7 @@ fn test_refund_request_one_ledger_past_window_rejected() {
     );
     let course_id = String::from_str(&env, "COURSE-WINDOW-PAST");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     let enrolled_at = env.ledger().sequence();
 
     // One ledger beyond the window
@@ -6703,7 +6703,7 @@ fn test_refund_request_far_past_window_rejected() {
     );
     let course_id = String::from_str(&env, "COURSE-WINDOW-FAR");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // Advance far past the window while keeping the instance accessible.
     env.ledger().with_mut(|l| {
@@ -6737,7 +6737,7 @@ fn test_admin_can_extend_refund_window_after_init() {
     );
     let course_id = String::from_str(&env, "COURSE-WINDOW-EXT");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     let enrolled_at = env.ledger().sequence();
 
     // Advance 6 ledgers — would exceed the old window of 5
@@ -6778,7 +6778,7 @@ fn test_refund_window_zero_rejects_all_requests() {
     );
     let course_id = String::from_str(&env, "COURSE-WINDOW-ZERO");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     // Even a single ledger advance places elapsed > 0 == window
     env.ledger().with_mut(|l| {
         l.sequence_number += 1;
@@ -7205,7 +7205,7 @@ fn test_content_hash_survives_enroll_and_completion() {
 
     let student = Address::generate(&env);
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &1_000_000_000);
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -7303,7 +7303,7 @@ fn test_platform_pause_lifecycle_end_to_end() {
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &1_000_000_000);
 
     // Enrollment should succeed when platform is active
-    client.enroll(&student, &String::from_str(&env, "COURSE-PAUSE-TEST"));
+    client.enroll(&student, &String::from_str(&env, "COURSE-PAUSE-TEST"), &i128::MAX);
     assert!(client.is_enrolled(&student, &String::from_str(&env, "COURSE-PAUSE-TEST")));
 
     // Complete and prepare for re-enrollment test
@@ -7322,20 +7322,20 @@ fn test_platform_pause_lifecycle_end_to_end() {
 
     // New enrollment should be rejected during pause
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.enroll(&student2, &String::from_str(&env, "COURSE-PAUSE-TEST"));
+        client.enroll(&student2, &String::from_str(&env, "COURSE-PAUSE-TEST"), &i128::MAX);
     }));
     assert!(result.is_err());
 
     // Re-enrollment should also be rejected during pause
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.re_enroll(&student, &String::from_str(&env, "COURSE-PAUSE-TEST"));
+        client.re_enroll(&student, &String::from_str(&env, "COURSE-PAUSE-TEST"), &i128::MAX);
     }));
     assert!(result.is_err());
 
     // Batch enrollment should be rejected during pause
     let courses = Vec::from_array(&env, [String::from_str(&env, "COURSE-PAUSE-TEST")]);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.batch_enroll(&student2, &courses);
+        client.batch_enroll(&student2, &courses, &i128::MAX);
     }));
     assert!(result.is_err());
 
@@ -7343,7 +7343,7 @@ fn test_platform_pause_lifecycle_end_to_end() {
     client.unpause_platform(&admin);
 
     // Enrollment should succeed after unpause
-    client.enroll(&student2, &String::from_str(&env, "COURSE-PAUSE-TEST"));
+    client.enroll(&student2, &String::from_str(&env, "COURSE-PAUSE-TEST"), &i128::MAX);
     assert!(client.is_enrolled(&student2, &String::from_str(&env, "COURSE-PAUSE-TEST")));
 }
 
@@ -7367,7 +7367,7 @@ fn test_enroll_blocked_during_platform_pause() {
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &1_000_000_000);
 
     client.pause_platform(&admin);
-    client.enroll(&student, &String::from_str(&env, "COURSE-001"));
+    client.enroll(&student, &String::from_str(&env, "COURSE-001"), &i128::MAX);
 }
 
 #[test]
@@ -7392,7 +7392,7 @@ fn test_batch_enroll_blocked_during_platform_pause() {
     client.pause_platform(&admin);
 
     let courses = Vec::from_array(&env, [String::from_str(&env, "COURSE-001")]);
-    client.batch_enroll(&student, &courses);
+    client.batch_enroll(&student, &courses, &i128::MAX);
 }
 
 // ============================================================
@@ -7423,11 +7423,11 @@ fn test_enrollment_succeeds_below_platform_cap() {
     token::StellarAssetClient::new(&env, &token_id).mint(&student2, &1_000_000_000);
 
     // First enrollment should succeed
-    client.enroll(&student1, &String::from_str(&env, "COURSE-001"));
+    client.enroll(&student1, &String::from_str(&env, "COURSE-001"), &i128::MAX);
     assert_eq!(client.get_total_active_enrollments(), 1);
 
     // Second enrollment should succeed
-    client.enroll(&student2, &String::from_str(&env, "COURSE-001"));
+    client.enroll(&student2, &String::from_str(&env, "COURSE-001"), &i128::MAX);
     assert_eq!(client.get_total_active_enrollments(), 2);
 }
 
@@ -7456,11 +7456,11 @@ fn test_enrollment_blocked_at_platform_cap() {
     token::StellarAssetClient::new(&env, &token_id).mint(&student2, &1_000_000_000);
 
     // First enrollment should succeed
-    client.enroll(&student1, &String::from_str(&env, "COURSE-001"));
+    client.enroll(&student1, &String::from_str(&env, "COURSE-001"), &i128::MAX);
     assert_eq!(client.get_total_active_enrollments(), 1);
 
     // Second enrollment should be rejected
-    client.enroll(&student2, &String::from_str(&env, "COURSE-001"));
+    client.enroll(&student2, &String::from_str(&env, "COURSE-001"), &i128::MAX);
 }
 
 #[test]
@@ -7485,8 +7485,8 @@ fn test_platform_counter_decrements_on_completion() {
     token::StellarAssetClient::new(&env, &token_id).mint(&student1, &1_000_000_000);
     token::StellarAssetClient::new(&env, &token_id).mint(&student2, &1_000_000_000);
 
-    client.enroll(&student1, &String::from_str(&env, "COURSE-001"));
-    client.enroll(&student2, &String::from_str(&env, "COURSE-001"));
+    client.enroll(&student1, &String::from_str(&env, "COURSE-001"), &i128::MAX);
+    client.enroll(&student2, &String::from_str(&env, "COURSE-001"), &i128::MAX);
     assert_eq!(client.get_total_active_enrollments(), 2);
 
     // Mark one as completed
@@ -7503,7 +7503,7 @@ fn test_platform_counter_decrements_on_completion() {
     // New enrollment should now succeed
     let student3 = Address::generate(&env);
     token::StellarAssetClient::new(&env, &token_id).mint(&student3, &1_000_000_000);
-    client.enroll(&student3, &String::from_str(&env, "COURSE-001"));
+    client.enroll(&student3, &String::from_str(&env, "COURSE-001"), &i128::MAX);
     assert_eq!(client.get_total_active_enrollments(), 2);
 }
 
@@ -7529,8 +7529,8 @@ fn test_platform_counter_decrements_on_refund() {
     token::StellarAssetClient::new(&env, &token_id).mint(&student1, &1_000_000_000);
     token::StellarAssetClient::new(&env, &token_id).mint(&student2, &1_000_000_000);
 
-    client.enroll(&student1, &String::from_str(&env, "COURSE-001"));
-    client.enroll(&student2, &String::from_str(&env, "COURSE-001"));
+    client.enroll(&student1, &String::from_str(&env, "COURSE-001"), &i128::MAX);
+    client.enroll(&student2, &String::from_str(&env, "COURSE-001"), &i128::MAX);
     assert_eq!(client.get_total_active_enrollments(), 2);
 
     // Request and approve refund
@@ -7550,7 +7550,7 @@ fn test_platform_counter_decrements_on_refund() {
     // New enrollment should now succeed
     let student3 = Address::generate(&env);
     token::StellarAssetClient::new(&env, &token_id).mint(&student3, &1_000_000_000);
-    client.enroll(&student3, &String::from_str(&env, "COURSE-001"));
+    client.enroll(&student3, &String::from_str(&env, "COURSE-001"), &i128::MAX);
     assert_eq!(client.get_total_active_enrollments(), 2);
 }
 
@@ -7576,7 +7576,7 @@ fn test_mark_completed_on_archived_course_rejected() {
 
     let student = Address::generate(&env);
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &1_000_000_000);
-    client.enroll(&student, &String::from_str(&env, "COURSE-001"));
+    client.enroll(&student, &String::from_str(&env, "COURSE-001"), &i128::MAX);
 
     // Mark completed first
     client.mark_completed(
@@ -7625,7 +7625,7 @@ fn test_mark_completed_rejects_archived_course_even_with_active_enrollment() {
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &1_000_000_000);
 
     // Enroll while course is active
-    client.enroll(&student, &String::from_str(&env, "COURSE-001"));
+    client.enroll(&student, &String::from_str(&env, "COURSE-001"), &i128::MAX);
 
     // Pause and archive the course
     client.pause_course(&admin, &String::from_str(&env, "COURSE-001"));
@@ -7667,7 +7667,7 @@ fn test_mark_completed_succeeds_on_paused_course() {
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &1_000_000_000);
 
     // Enroll while course is active
-    client.enroll(&student, &String::from_str(&env, "COURSE-001"));
+    client.enroll(&student, &String::from_str(&env, "COURSE-001"), &i128::MAX);
 
     // Pause the course
     client.pause_course(&admin, &String::from_str(&env, "COURSE-001"));
@@ -7848,7 +7848,7 @@ fn test_enroll_blocked_without_completed_prerequisite() {
     client.set_prerequisite_courses(&instructor, &course_b, &prereqs);
 
     // Student never enrolled/completed course A — direct enrollment in B must fail.
-    client.enroll(&student, &course_b);
+    client.enroll(&student, &course_b, &i128::MAX);
 }
 
 #[test]
@@ -7887,7 +7887,7 @@ fn test_enroll_blocked_when_prerequisite_completed_but_not_certified() {
     client.set_prerequisite_courses(&instructor, &course_b, &prereqs);
 
     // Student completes A but no certificate is ever issued.
-    client.enroll(&student, &course_a);
+    client.enroll(&student, &course_a, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -7895,7 +7895,7 @@ fn test_enroll_blocked_when_prerequisite_completed_but_not_certified() {
         &Some(evidence_hash(&env, "evidence")),
     );
 
-    client.enroll(&student, &course_b);
+    client.enroll(&student, &course_b, &i128::MAX);
 }
 
 #[test]
@@ -7932,7 +7932,7 @@ fn test_enroll_succeeds_with_completed_and_certified_prerequisite() {
     prereqs.push_back(course_a.clone());
     client.set_prerequisite_courses(&instructor, &course_b, &prereqs);
 
-    client.enroll(&student, &course_a);
+    client.enroll(&student, &course_a, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -7950,7 +7950,7 @@ fn test_enroll_succeeds_with_completed_and_certified_prerequisite() {
         &None,
     );
 
-    client.enroll(&student, &course_b);
+    client.enroll(&student, &course_b, &i128::MAX);
     assert!(client.is_enrolled(&student, &course_b));
 }
 
@@ -7990,7 +7990,7 @@ fn test_enroll_blocked_when_prerequisite_certificate_revoked() {
     prereqs.push_back(course_a.clone());
     client.set_prerequisite_courses(&instructor, &course_b, &prereqs);
 
-    client.enroll(&student, &course_a);
+    client.enroll(&student, &course_a, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -8010,7 +8010,7 @@ fn test_enroll_blocked_when_prerequisite_certificate_revoked() {
     client.revoke_certificate(&admin, &cert_id, &String::from_str(&env, "ISSUED_IN_ERROR"));
 
     // The prerequisite's certificate has been revoked — enrollment must still be blocked.
-    client.enroll(&student, &course_b);
+    client.enroll(&student, &course_b, &i128::MAX);
 }
 
 // ============================================================
@@ -8039,7 +8039,7 @@ fn test_issue_certificate_after_revoke_is_rejected() {
     let course_id = String::from_str(&env, "COURSE-REVOKE-REISSUE");
     let first_cert_id = String::from_str(&env, "CERT-ORIGINAL");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -8112,7 +8112,7 @@ fn test_reissue_certificate_allowed_after_re_enroll() {
     let first_cert_id = String::from_str(&env, "CERT-FIRST-ATTEMPT");
     let second_cert_id = String::from_str(&env, "CERT-SECOND-ATTEMPT");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -8144,7 +8144,7 @@ fn test_reissue_certificate_allowed_after_re_enroll() {
 
     // A genuinely fresh attempt — via re_enroll(), which creates a brand-new
     // Enrollment record — can still earn its own certificate.
-    client.re_enroll(&student, &course_id);
+    client.re_enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -8329,7 +8329,7 @@ fn test_issue_141_certificate_course_id_matches_enrollment() {
     let course_id = String::from_str(&env, "COURSE-141-TEST");
     let cert_id = String::from_str(&env, "CERT-141-TEST");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -8404,7 +8404,7 @@ fn test_issue_141_enrollment_ref_is_unique_per_enrollment() {
     let course_id = String::from_str(&env, "COURSE-UNIQUE-REF");
 
     // First enrollment
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     let ref1 = get_enrollment_ref(&env, &client, &student, "COURSE-UNIQUE-REF");
 
     // Complete and issue cert for first enrollment
@@ -8426,7 +8426,7 @@ fn test_issue_141_enrollment_ref_is_unique_per_enrollment() {
     );
 
     // Re-enroll (creates new enrollment with new ref)
-    client.re_enroll(&student, &course_id);
+    client.re_enroll(&student, &course_id, &i128::MAX);
     let ref2 = get_enrollment_ref(&env, &client, &student, "COURSE-UNIQUE-REF");
 
     // Enrollment refs must be different
@@ -8458,7 +8458,7 @@ fn test_issue_146_revocation_starts_pending() {
     let course_id = String::from_str(&env, "COURSE-PENDING-REV");
     let cert_id = String::from_str(&env, "CERT-PENDING-REV");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(&admin, &student, &course_id, &None);
     client.issue_certificate(
         &admin,
@@ -8508,7 +8508,7 @@ fn test_issue_146_student_can_challenge_pending_revocation() {
     let course_id = String::from_str(&env, "COURSE-CHALLENGE-OK");
     let cert_id = String::from_str(&env, "CERT-CHALLENGE-OK");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(&admin, &student, &course_id, &None);
     client.issue_certificate(
         &admin,
@@ -8557,7 +8557,7 @@ fn test_issue_146_unauthorized_challenge_fails() {
     let course_id = String::from_str(&env, "COURSE-UNAUTH-CHAL");
     let cert_id = String::from_str(&env, "CERT-UNAUTH-CHAL");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(&admin, &student, &course_id, &None);
     client.issue_certificate(
         &admin,
@@ -8598,7 +8598,7 @@ fn test_issue_146_challenge_without_revocation_fails() {
     let course_id = String::from_str(&env, "COURSE-NO-REV");
     let cert_id = String::from_str(&env, "CERT-NO-REV");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(&admin, &student, &course_id, &None);
     client.issue_certificate(
         &admin,
@@ -8637,7 +8637,7 @@ fn test_issue_146_late_challenge_fails() {
     let course_id = String::from_str(&env, "COURSE-LATE-CHAL");
     let cert_id = String::from_str(&env, "CERT-LATE-CHAL");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(&admin, &student, &course_id, &None);
     client.issue_certificate(
         &admin,
@@ -8684,7 +8684,7 @@ fn test_issue_146_revocation_becomes_permanent_after_deadline() {
     let course_id = String::from_str(&env, "COURSE-PERM-REV");
     let cert_id = String::from_str(&env, "CERT-PERM-REV");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(&admin, &student, &course_id, &None);
     client.issue_certificate(
         &admin,
@@ -8735,7 +8735,7 @@ fn test_issue_146_double_revocation_rejected() {
     let course_id = String::from_str(&env, "COURSE-DBL-REV");
     let cert_id = String::from_str(&env, "CERT-DBL-REV");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(&admin, &student, &course_id, &None);
     client.issue_certificate(
         &admin,
@@ -8775,7 +8775,7 @@ fn test_issue_146_challenge_boundary_condition() {
     let course_id = String::from_str(&env, "COURSE-BOUNDARY");
     let cert_id = String::from_str(&env, "CERT-BOUNDARY");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(&admin, &student, &course_id, &None);
     client.issue_certificate(
         &admin,
@@ -8824,7 +8824,7 @@ fn test_issue_146_rerevocation_after_successful_challenge() {
     let course_id = String::from_str(&env, "COURSE-RE-REV");
     let cert_id = String::from_str(&env, "CERT-RE-REV");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(&admin, &student, &course_id, &None);
     client.issue_certificate(
         &admin,
@@ -8881,7 +8881,7 @@ fn test_issue_146_configurable_challenge_period() {
     let course_id = String::from_str(&env, "COURSE-SHORT-PERIOD");
     let cert_id = String::from_str(&env, "CERT-SHORT-PERIOD");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(&admin, &student, &course_id, &None);
     client.issue_certificate(
         &admin,
@@ -8929,7 +8929,7 @@ fn test_enrollment_rejected_event_emitted_for_paused_course() {
 
     // Attempt enrollment - should panic with rejection event emitted
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.enroll(&student, &course_id);
+        client.enroll(&student, &course_id, &i128::MAX);
     }));
     assert!(
         result.is_err(),
@@ -8982,7 +8982,7 @@ fn test_enrollment_rejected_event_emitted_for_pending_course() {
 
     // Attempt enrollment - should panic with rejection event emitted
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.enroll(&student, &course_id);
+        client.enroll(&student, &course_id, &i128::MAX);
     }));
     assert!(
         result.is_err(),
@@ -9035,7 +9035,7 @@ fn test_enrollment_rejected_event_emitted_for_archived_course() {
 
     // Attempt enrollment - should panic with rejection event emitted
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.enroll(&student, &course_id);
+        client.enroll(&student, &course_id, &i128::MAX);
     }));
     assert!(
         result.is_err(),
@@ -9204,7 +9204,7 @@ fn test_mark_completed_twice_rejected() {
     );
     let course_id = String::from_str(&env, "COURSE-DBL-COMPLETE");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // First completion - should succeed
     client.mark_completed(
@@ -9247,7 +9247,7 @@ fn test_mark_completed_twice_idempotency_check() {
     );
     let course_id = String::from_str(&env, "COURSE-IDEMPOTENT");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     let evidence = Some(evidence_hash(&env, "same_evidence"));
 
@@ -9482,7 +9482,7 @@ fn test_fee_preview_matches_actual_enroll_deduction() {
         preview
     );
 
-    client.enroll(&student, &String::from_str(&env, "COURSE-FEE-PREVIEW"));
+    client.enroll(&student, &String::from_str(&env, "COURSE-FEE-PREVIEW"), &i128::MAX);
 
     // The preview must equal what enroll() actually deducted.
     assert_eq!(token_client.balance(&treasury), preview.platform_fee);
@@ -9519,7 +9519,7 @@ fn test_issue_certificate_with_uuid_enrollment_reference() {
     );
     let course_id = String::from_str(&env, "COURSE-UUID-REF");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -9566,7 +9566,7 @@ fn test_mark_completed_accepts_zeroed_evidence_hash() {
         500_000_000,
     );
     let course_id = String::from_str(&env, "COURSE-EMPTY-EVIDENCE");
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     let evidence = Some(BytesN::from_array(&env, &[0u8; 32]));
     client.mark_completed(&admin, &student, &course_id, &evidence);
@@ -9596,7 +9596,7 @@ fn test_mark_completed_with_evidence_needs_no_student_signature() {
         500_000_000,
     );
     let course_id = String::from_str(&env, "COURSE-EVIDENCE-ONLY");
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // Only the admin signs; the student's auth is deliberately not mocked.
     let evidence = Some(evidence_hash(&env, "sha256:9f86d081884c7d65"));
@@ -9640,7 +9640,7 @@ fn test_get_certificate_denies_third_party_even_with_student_auth() {
         500_000_000,
     );
     let course_id = String::from_str(&env, "COURSE-CERT-DENY");
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -9684,7 +9684,7 @@ fn test_get_certificate_allows_student_instructor_and_admin() {
         500_000_000,
     );
     let course_id = String::from_str(&env, "COURSE-CERT-ALLOW");
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -10077,7 +10077,7 @@ fn enroll_and_certify(
     token::StellarAssetClient::new(env, token_id).mint(student, &100_000_000_000);
 
     let course = String::from_str(env, course_id);
-    client.enroll(student, &course);
+    client.enroll(student, &course, &i128::MAX);
     client.mark_completed(
         admin,
         student,
@@ -10703,7 +10703,7 @@ fn test_circuit_breaker_trips_after_threshold_failures() {
     let student = Address::generate(&env);
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &500_000_000i128);
     // This call must trip the circuit breaker.
-    client.enroll(&student, &String::from_str(&env, "CB-TRIP"));
+    client.enroll(&student, &String::from_str(&env, "CB-TRIP"), &i128::MAX);
 }
 
 #[test]
@@ -10729,7 +10729,7 @@ fn test_circuit_breaker_does_not_trip_below_threshold() {
     let student = Address::generate(&env);
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &500_000_000i128);
     // Must succeed.
-    client.enroll(&student, &String::from_str(&env, "CB-BELOW"));
+    client.enroll(&student, &String::from_str(&env, "CB-BELOW"), &i128::MAX);
     // After success the failure counter must be reset to 0.
     env.as_contract(&contract_id, || {
         let count: u32 = env
@@ -10881,7 +10881,7 @@ fn test_mark_completed_extends_enrollment_and_course_ttl() {
         100_000_000,
     );
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     env.ledger().with_mut(|l| {
         l.sequence_number += 100;
@@ -10918,7 +10918,7 @@ fn test_issue_certificate_extends_enrollment_ttl() {
         100_000_000,
     );
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     env.ledger().with_mut(|l| {
         l.sequence_number += 100;
@@ -11110,7 +11110,7 @@ fn setup_arbitration(
     );
     let student = Address::generate(env);
     token::StellarAssetClient::new(env, token_id).mint(&student, &100_000_000_000);
-    client.enroll(&student, &String::from_str(env, course_id));
+    client.enroll(&student, &String::from_str(env, course_id), &i128::MAX);
     student
 }
 
@@ -11276,7 +11276,7 @@ fn test_process_refund_archives_enrollment_to_history() {
     let course_id = String::from_str(&env, "COURSE-REFUND-ARCHIVE");
 
     // Capture the amount paid at enrollment.
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     let enrollment = client
         .get_enrollment(&student, &student, &course_id)
         .unwrap();
@@ -11337,7 +11337,7 @@ fn test_re_enroll_rejects_before_enrollment_start_ledger() {
     );
     let course_id = String::from_str(&env, "COURSE-REENROLL-START");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -11350,7 +11350,7 @@ fn test_re_enroll_rejects_before_enrollment_start_ledger() {
     client.set_enrollment_start_ledger(&instructor, &course_id, &Some(enrollment_start));
 
     // Must panic exactly like enroll()
-    client.re_enroll(&student, &course_id);
+    client.re_enroll(&student, &course_id, &i128::MAX);
 }
 
 #[test]
@@ -11372,7 +11372,7 @@ fn test_re_enroll_succeeds_at_enrollment_start_ledger() {
     );
     let course_id = String::from_str(&env, "COURSE-REENROLL-START-OK");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     client.mark_completed(
         &admin,
         &student,
@@ -11386,7 +11386,7 @@ fn test_re_enroll_succeeds_at_enrollment_start_ledger() {
         l.sequence_number = enrollment_start;
     });
 
-    client.re_enroll(&student, &course_id);
+    client.re_enroll(&student, &course_id, &i128::MAX);
 
     let enrollment = client
         .get_enrollment(&student, &student, &course_id)
@@ -11421,7 +11421,7 @@ fn test_withdraw_tokens_cannot_drain_unwithdrawn_instructor_earnings() {
     let course_id = String::from_str(&env, "COURSE-EARNINGS-PROTECT");
 
     // Student enrolls: platform fee is 20% (200_000_000), instructor gets 80% (800_000_000)
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // Verify contract balance is 800_000_000 and total liabilities is 800_000_000
     assert_eq!(
@@ -11459,7 +11459,7 @@ fn test_withdraw_tokens_caps_withdrawal_to_surplus_above_liabilities() {
     let course_id = String::from_str(&env, "COURSE-SURPLUS-TEST");
 
     // Student enrolls: 800_000_000 instructor earnings held in contract
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
 
     // Mint surplus of 500_000_000 directly to contract
     token::StellarAssetClient::new(&env, &token_id).mint(&contract_id, &500_000_000);
@@ -11557,7 +11557,7 @@ fn test_withdraw_tokens_accounting_lifecycle_with_refunds_and_arbitration() {
     );
     let course_id = String::from_str(&env, "COURSE-ACCOUNTING");
 
-    client.enroll(&student, &course_id);
+    client.enroll(&student, &course_id, &i128::MAX);
     // 800_000_000 credited to instructor
     assert_eq!(client.get_total_liabilities(&token_id), 800_000_000);
 
@@ -11571,4 +11571,266 @@ fn test_withdraw_tokens_accounting_lifecycle_with_refunds_and_arbitration() {
     assert_eq!(client.get_owed_balance(&token_id), 0);
     assert_eq!(client.get_outstanding_earnings(&token_id), 0);
     assert_eq!(token::Client::new(&env, &token_id).balance(&contract_id), 0);
+}
+
+// ============================================================
+// #361 — max_price guard tests
+// ============================================================
+
+#[test]
+fn test_enroll_price_guard_equal_price_succeeds() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &10_000_000_000);
+
+    let price: i128 = 100_000_000;
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-GUARD-EQ",
+        price,
+    );
+    let course_id = String::from_str(&env, "COURSE-GUARD-EQ");
+
+    // max_price exactly equal to the current price is accepted.
+    client.enroll(&student, &course_id, &price);
+    assert!(client.is_enrolled(&student, &course_id));
+}
+
+#[test]
+fn test_enroll_price_guard_lower_price_succeeds() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &10_000_000_000);
+
+    let price: i128 = 100_000_000;
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-GUARD-LOW",
+        price,
+    );
+    let course_id = String::from_str(&env, "COURSE-GUARD-LOW");
+
+    // Current price is below the student's maximum, so it is accepted.
+    client.enroll(&student, &course_id, &(price + 1));
+    let enrollment = client
+        .get_enrollment(&student, &student, &course_id)
+        .unwrap();
+    assert_eq!(enrollment.amount_paid, price);
+}
+
+#[test]
+#[should_panic(expected = "exceeds maximum accepted price")]
+fn test_enroll_price_guard_higher_price_reverts() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &10_000_000_000);
+
+    let price: i128 = 100_000_000;
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-GUARD-HIGH",
+        price,
+    );
+    let course_id = String::from_str(&env, "COURSE-GUARD-HIGH");
+
+    // Current price is above the student's maximum: revert before payment.
+    client.enroll(&student, &course_id, &(price - 1));
+}
+
+#[test]
+#[should_panic(expected = "exceeds maximum accepted price")]
+fn test_enroll_price_guard_reverts_after_price_increase() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &10_000_000_000);
+
+    let price: i128 = 100_000_000;
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-GUARD-RAISE",
+        price,
+    );
+    let course_id = String::from_str(&env, "COURSE-GUARD-RAISE");
+
+    // The student quoted `price`. The instructor raises the price in the same
+    // ledger before the student's transaction executes.
+    let student_quote = price;
+    client.update_course(&instructor, &course_id, &Some(price + 1), &None);
+
+    // The stale quote no longer covers the current price, so it reverts.
+    client.enroll(&student, &course_id, &student_quote);
+}
+
+#[test]
+#[should_panic(expected = "exceeds maximum accepted price")]
+fn test_batch_enroll_price_guard_reverts_when_any_course_exceeds_limit() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &10_000_000_000);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-GUARD-BATCH-A",
+        100_000_000,
+    );
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-GUARD-BATCH-B",
+        200_000_000,
+    );
+
+    let mut course_ids = soroban_sdk::Vec::new(&env);
+    course_ids.push_back(String::from_str(&env, "COURSE-GUARD-BATCH-A"));
+    course_ids.push_back(String::from_str(&env, "COURSE-GUARD-BATCH-B"));
+
+    // The limit only covers the first course, so the whole atomic batch reverts
+    // when the second course's price exceeds it.
+    client.batch_enroll(&student, &course_ids, &150_000_000);
+}
+
+#[test]
+fn test_batch_enroll_price_guard_accepts_when_max_covers_all() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &10_000_000_000);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-GUARD-BATCH-OK-A",
+        100_000_000,
+    );
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-GUARD-BATCH-OK-B",
+        200_000_000,
+    );
+
+    let mut course_ids = soroban_sdk::Vec::new(&env);
+    course_ids.push_back(String::from_str(&env, "COURSE-GUARD-BATCH-OK-A"));
+    course_ids.push_back(String::from_str(&env, "COURSE-GUARD-BATCH-OK-B"));
+
+    // A single per-course limit that covers the most expensive course succeeds
+    // and returns the exact total paid.
+    let total = client.batch_enroll(&student, &course_ids, &200_000_000);
+    assert_eq!(total, 300_000_000);
+    assert!(client.is_enrolled(&student, &String::from_str(&env, "COURSE-GUARD-BATCH-OK-A")));
+    assert!(client.is_enrolled(&student, &String::from_str(&env, "COURSE-GUARD-BATCH-OK-B")));
+}
+
+#[test]
+#[should_panic(expected = "exceeds maximum accepted price")]
+fn test_re_enroll_price_guard_reverts_after_price_increase() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &10_000_000_000);
+
+    let price: i128 = 100_000_000;
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-GUARD-REENROLL",
+        price,
+    );
+    let course_id = String::from_str(&env, "COURSE-GUARD-REENROLL");
+
+    client.enroll(&student, &course_id, &price);
+    client.mark_completed(
+        &admin,
+        &student,
+        &course_id,
+        &Some(evidence_hash(&env, "guard_evidence")),
+    );
+
+    let student_quote = price;
+    client.update_course(&instructor, &course_id, &Some(price + 1), &None);
+
+    client.re_enroll(&student, &course_id, &student_quote);
+}
+
+#[test]
+fn test_re_enroll_price_guard_allows_matching_max_price() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &10_000_000_000);
+
+    let price: i128 = 100_000_000;
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-GUARD-REENROLL-OK",
+        price,
+    );
+    let course_id = String::from_str(&env, "COURSE-GUARD-REENROLL-OK");
+
+    client.enroll(&student, &course_id, &price);
+    client.mark_completed(
+        &admin,
+        &student,
+        &course_id,
+        &Some(evidence_hash(&env, "guard_evidence_ok")),
+    );
+
+    let new_price = price + 1;
+    client.update_course(&instructor, &course_id, &Some(new_price), &None);
+
+    // The student re-quotes the new price and the re-enrollment succeeds.
+    client.re_enroll(&student, &course_id, &new_price);
+    let enrollment = client
+        .get_enrollment(&student, &student, &course_id)
+        .unwrap();
+    assert_eq!(enrollment.amount_paid, new_price);
 }
