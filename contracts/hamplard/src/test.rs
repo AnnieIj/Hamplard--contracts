@@ -2170,6 +2170,7 @@ fn test_enroll_insufficient_funds_rollback() {
     // scoped `enrollment_failed` event with reason INSUFFICIENT_BALANCE.
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &150_000_000);
 
+<<<<<<< HEAD
     // The token transfer fails, so enroll() emits an EnrollmentFailed event
     // and returns without recording an enrollment or moving any funds.
     client.enroll(&student, &course_id);
@@ -2200,6 +2201,18 @@ fn test_enroll_insufficient_funds_rollback() {
     assert_eq!(token_client.balance(&treasury), 0);
     assert_eq!(token_client.balance(&student), 150_000_000);
     assert_eq!(token_client.balance(&contract_id), 0);
+=======
+    // The transfer failure is reported through the failed-enrollment path
+    // instead of a panic, so this call returns without creating an enrollment.
+    client.enroll(&student, &course_id);
+
+    // Verify no tokens moved and no enrollment was recorded (rollback proof)
+    assert_eq!(token_client.balance(&treasury), 0);
+    assert_eq!(token_client.balance(&student), 150_000_000);
+    assert!(client
+        .get_enrollment(&student, &student, &course_id)
+        .is_none());
+>>>>>>> pr/601
 }
 
 #[test]
@@ -2906,6 +2919,7 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
@@ -2919,6 +2933,9 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 >>>>>>> pr/586
+=======
+        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
+>>>>>>> pr/601
     }));
     assert!(res.is_err(), "old admin must be rejected by process_refund");
 
@@ -11025,6 +11042,119 @@ fn test_get_effective_fee_for_payment_rejects_negative_amount() {
     let student = Address::generate(&env);
 
     client.get_effective_fee_for_payment(&student, &token_id, &-1_000_000_000i128);
+}
+
+fn panic_payload_text(payload: &(dyn std::any::Any + Send)) -> std::string::String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        return std::string::String::from(*message);
+    }
+    if let Some(message) = payload.downcast_ref::<std::string::String>() {
+        return message.clone();
+    }
+    std::string::String::new()
+}
+
+#[test]
+fn test_issue456_quote_and_deduction_share_fee_math_across_ranges() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let student = Address::generate(&env);
+
+    // Cover the zero/minimum/typical/max-fee boundaries. `i128::MAX / 10000`
+    // is the largest amount whose fee multiplication stays in range at 100%.
+    let amounts = [0i128, 1, 123_456_789, i128::MAX / 10000];
+    let fee_bps_values = [0u32, 1, 250, 2000, 5000, 9999, 10000];
+
+    for fee_bps in fee_bps_values {
+        client.set_fee_config(&admin, &token_id, &fee_bps);
+
+        for amount in amounts {
+            let quote = client.get_effective_fee_for_payment(&student, &token_id, &amount);
+            let (net_amount, deducted_fee) = env.as_contract(&contract_id, || {
+                HamplardContract::deduct_fee(&env, &token_id, amount, None, false, false)
+            });
+
+            assert_eq!(
+                quote.platform_fee, deducted_fee,
+                "quote and deduction diverged for amount={amount}, fee_bps={fee_bps}"
+            );
+            assert_eq!(
+                net_amount + deducted_fee,
+                amount,
+                "deduction split does not preserve the payment amount"
+            );
+            assert_eq!(quote.effective_fee_bps, fee_bps);
+        }
+    }
+}
+
+#[test]
+fn test_issue456_quote_and_deduction_panic_identically_on_overflow() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let student = Address::generate(&env);
+
+    client.set_fee_config(&admin, &token_id, &10000u32);
+    let overflow_amount = i128::MAX / 10000 + 1;
+
+    let quote_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.get_effective_fee_for_payment(&student, &token_id, &overflow_amount)
+    }));
+    let deduction_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        env.as_contract(&contract_id, || {
+            HamplardContract::deduct_fee(&env, &token_id, overflow_amount, None, false, false)
+        })
+    }));
+
+    let quote_panic = quote_result.expect_err("quote must fail on fee overflow");
+    let deduction_panic = deduction_result.expect_err("deduction must fail on fee overflow");
+    let quote_text = panic_payload_text(quote_panic.as_ref());
+    let deduction_text = panic_payload_text(deduction_panic.as_ref());
+    let shared_panic = "overflow computing platform fee";
+
+    // Public contract calls wrap the contract panic in a HostError envelope,
+    // while a direct internal call surfaces the panic payload itself. Both
+    // must still carry the exact same contract-level panic message.
+    assert!(
+        quote_text.contains(shared_panic),
+        "unexpected quote panic: {quote_text}"
+    );
+    assert!(
+        deduction_text.contains(shared_panic),
+        "unexpected deduction panic: {deduction_text}"
+    );
+}
+
+#[test]
+fn test_issue456_course_override_overflow_uses_shared_guard() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    // The live token fee is low enough that the base fee multiplication is
+    // safe, but a 100% course override is not. The override must go through
+    // the same overflow guard rather than a separate fee calculation.
+    client.set_fee_config(&admin, &token_id, &100u32);
+    let overflow_amount = i128::MAX / 10000 + 1;
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        env.as_contract(&contract_id, || {
+            HamplardContract::deduct_fee(
+                &env,
+                &token_id,
+                overflow_amount,
+                Some(10000u32),
+                false,
+                false,
+            )
+        })
+    }));
+
+    let panic = result.expect_err("override fee overflow must panic");
+    let panic_text = panic_payload_text(panic.as_ref());
+    assert!(
+        panic_text.contains("overflow computing platform fee"),
+        "unexpected override panic: {panic_text}"
+    );
 }
 
 #[test]
