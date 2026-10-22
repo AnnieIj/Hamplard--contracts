@@ -11128,6 +11128,245 @@ fn test_approve_course_init_ledger_stored_correctly() {
 // RISK PREVIEW, CERTIFICATE, EVIDENCE & READ AUTH TESTS (#225, #226, #227, #228)
 // ============================================================
 
+// ============================================================
+// #498 — RISK-BASED FEE PRICING COVERAGE
+// ============================================================
+
+/// Risk pricing is off unless explicitly enabled: configured surcharges must
+/// stay inert and the quote must fall back to the base per-token fee.
+#[test]
+fn test_risk_pricing_disabled_ignores_configured_surcharges() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let student = Address::generate(&env);
+
+    // Surcharges are configured, but pricing was never enabled.
+    client.set_risk_fee_config(&admin, &500u32, &500_000_000i128, &700u32, &900u32);
+    assert!(
+        !client.is_risk_config_enabled(),
+        "risk pricing must default to disabled"
+    );
+
+    // 100 USDC — well above the 50 USDC large-payment threshold.
+    let payment: i128 = 1_000_000_000;
+
+    let score = client.calculate_risk_score(&student, &token_id, &payment);
+    assert_eq!(score.score, 0, "disabled pricing must not score the payment");
+    assert_eq!(
+        score.surcharge_bps, 0,
+        "disabled pricing must not add a surcharge"
+    );
+
+    let quote = client.get_effective_fee_for_payment(&student, &token_id, &payment);
+    assert_eq!(quote.risk_surcharge_bps, 0);
+    assert_eq!(
+        quote.effective_fee_bps, quote.base_fee_bps,
+        "effective fee must equal the base fee while pricing is disabled"
+    );
+    assert_eq!(
+        quote.platform_fee,
+        payment * quote.base_fee_bps as i128 / 10_000
+    );
+}
+
+/// Enabling pricing makes a payment above the configured threshold carry the
+/// large-payment surcharge, and the preview must reflect it.
+#[test]
+fn test_risk_pricing_enabled_applies_large_payment_surcharge() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let student = Address::generate(&env);
+
+    client.set_risk_fee_config(&admin, &500u32, &500_000_000i128, &700u32, &900u32);
+    client.set_risk_config_enabled(&admin, &true);
+    assert!(client.is_risk_config_enabled());
+
+    let payment: i128 = 1_000_000_000;
+    let score = client.calculate_risk_score(&student, &token_id, &payment);
+    assert_eq!(score.score, 30, "large payment contributes 30 to the score");
+    assert_eq!(score.surcharge_bps, 500);
+
+    let quote = client.get_effective_fee_for_payment(&student, &token_id, &payment);
+    assert_eq!(quote.base_fee_bps, 2000, "platform default fee is 20%");
+    assert_eq!(quote.risk_surcharge_bps, 500);
+    assert_eq!(quote.effective_fee_bps, 2500);
+    assert_eq!(quote.platform_fee, payment * 2500 / 10_000);
+}
+
+/// A payment at or below the threshold gets no surcharge even when pricing is
+/// enabled — only the base fee applies.
+#[test]
+fn test_risk_pricing_below_threshold_charges_base_fee_only() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let student = Address::generate(&env);
+
+    client.set_risk_fee_config(&admin, &500u32, &500_000_000i128, &700u32, &900u32);
+    client.set_risk_config_enabled(&admin, &true);
+
+    // Exactly at the threshold is not "above" it.
+    let at_threshold: i128 = 500_000_000;
+    let score = client.calculate_risk_score(&student, &token_id, &at_threshold);
+    assert_eq!(score.score, 0);
+    assert_eq!(score.surcharge_bps, 0);
+
+    let quote = client.get_effective_fee_for_payment(&student, &token_id, &at_threshold);
+    assert_eq!(quote.risk_surcharge_bps, 0);
+    assert_eq!(quote.effective_fee_bps, quote.base_fee_bps);
+}
+
+/// Base fee plus surcharge is clamped at 100%: the platform can never be
+/// credited more than the payment, and the instructor share floors at zero.
+#[test]
+fn test_risk_pricing_effective_fee_capped_at_10000_bps() {
+    let (env, contract_id, token_id, admin, _sec_admin, treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &token_id);
+
+    // 20% base + 90% surcharge = 11000 bps, which must clamp to 10000.
+    client.set_risk_fee_config(&admin, &9000u32, &500_000_000i128, &0u32, &0u32);
+    client.set_risk_config_enabled(&admin, &true);
+
+    let student = Address::generate(&env);
+    let price: i128 = 1_000_000_000;
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &price);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-RISK-CAP",
+        price,
+    );
+
+    let quote = client.get_effective_fee_for_payment(&student, &token_id, &price);
+    assert_eq!(quote.base_fee_bps, 2000);
+    assert_eq!(quote.risk_surcharge_bps, 9000);
+    assert_eq!(
+        quote.effective_fee_bps, 10000,
+        "effective fee must be capped at 100%"
+    );
+    assert_eq!(quote.platform_fee, price, "the whole payment is the fee");
+
+    client.enroll(&student, &String::from_str(&env, "COURSE-RISK-CAP"));
+
+    // The clamp holds end-to-end: treasury takes everything, instructor nothing.
+    assert_eq!(token_client.balance(&treasury), price);
+    assert_eq!(client.get_instructor_earnings(&instructor, &token_id), 0);
+}
+
+/// A surcharge actually charged at enrollment emits `risk_fee_applied` with the
+/// same breakdown the quote returned.
+#[test]
+fn test_risk_fee_applied_event_emitted_on_enroll() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    client.set_risk_fee_config(&admin, &500u32, &500_000_000i128, &700u32, &900u32);
+    client.set_risk_config_enabled(&admin, &true);
+
+    let student = Address::generate(&env);
+    let price: i128 = 1_000_000_000;
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &price);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-RISK-EVENT",
+        price,
+    );
+
+    let quote = client.get_effective_fee_for_payment(&student, &token_id, &price);
+    client.enroll(&student, &String::from_str(&env, "COURSE-RISK-EVENT"));
+
+    let mut applied_events = 0u32;
+    for (contract, topics, data) in env.events().all().iter() {
+        if contract != contract_id {
+            continue;
+        }
+        let sym: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        if sym != Symbol::new(&env, "risk_fee_applied") {
+            continue;
+        }
+        applied_events += 1;
+        let applied: RiskFeeApplied = data.try_into_val(&env).unwrap();
+        assert_eq!(applied, quote, "the event must carry the charged breakdown");
+        assert_eq!(applied.risk_surcharge_bps, 500);
+    }
+
+    assert_eq!(
+        applied_events, 1,
+        "exactly one risk_fee_applied event per surcharged enrollment"
+    );
+}
+
+/// No surcharge means no `risk_fee_applied` event — the signal stays meaningful.
+#[test]
+fn test_risk_fee_applied_event_absent_without_surcharge() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    let price: i128 = 1_000_000_000;
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &price);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-RISK-QUIET",
+        price,
+    );
+
+    client.enroll(&student, &String::from_str(&env, "COURSE-RISK-QUIET"));
+
+    for (contract, topics, _data) in env.events().all().iter() {
+        if contract != contract_id {
+            continue;
+        }
+        let sym: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        assert_ne!(
+            sym,
+            Symbol::new(&env, "risk_fee_applied"),
+            "no surcharge was applied, so no risk_fee_applied event is allowed"
+        );
+    }
+}
+
+#[test]
+#[should_panic(expected = "large_payment_threshold cannot be negative")]
+fn test_set_risk_fee_config_rejects_negative_threshold() {
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    client.set_risk_fee_config(&admin, &500u32, &-1i128, &0u32, &0u32);
+}
+
+#[test]
+#[should_panic(expected = "unauthorized: set_risk_config_enabled - caller is not admin")]
+fn test_set_risk_config_enabled_requires_admin() {
+    let (env, contract_id, _token_id, _admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    client.set_risk_config_enabled(&instructor, &true);
+}
+
+#[test]
+#[should_panic(expected = "unauthorized: set_risk_fee_config - caller is not admin")]
+fn test_set_risk_fee_config_requires_admin() {
+    let (env, contract_id, _token_id, _admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    client.set_risk_fee_config(&instructor, &500u32, &500_000_000i128, &0u32, &0u32);
+}
+
 #[test]
 fn test_fee_preview_matches_actual_enroll_deduction() {
     let (env, contract_id, token_id, admin, _sec_admin, treasury, instructor) = setup();
