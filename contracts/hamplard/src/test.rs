@@ -2154,6 +2154,7 @@ fn test_enroll_insufficient_funds_rollback() {
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &150_000_000);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
     // The token transfer fails, so enroll() emits an EnrollmentFailed event
     // and returns without recording an enrollment or moving any funds.
     client.enroll(&student, &course_id);
@@ -2181,6 +2182,12 @@ fn test_enroll_insufficient_funds_rollback() {
 
     // Verify treasury didn't receive any tokens and no balances moved
 >>>>>>> pr/552
+=======
+    // Enrollment aborts when the full price transfer fails.
+    client.enroll(&student, &course_id);
+
+    assert!(!client.is_enrolled(&student, &course_id));
+>>>>>>> pr/584
     assert_eq!(token_client.balance(&treasury), 0);
     assert_eq!(token_client.balance(&student), 150_000_000);
     assert_eq!(token_client.balance(&contract_id), 0);
@@ -2891,6 +2898,7 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
@@ -2910,6 +2918,9 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 >>>>>>> pr/580
+=======
+        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
+>>>>>>> pr/584
     }));
     assert!(res.is_err(), "old admin must be rejected by process_refund");
 
@@ -12927,6 +12938,7 @@ fn test_resolve_arbitration_payout_to_instructor() {
     assert_eq!(case.status, DisputeStatus::ResolvedForInstructor);
 }
 
+<<<<<<< HEAD
 /// #466 — arbitration fees are configured independently per token.
 #[test]
 fn test_arbitration_fee_config_is_per_token() {
@@ -12958,6 +12970,87 @@ fn test_arbitration_fee_config_is_per_token() {
 /// when the case is resolved.
 #[test]
 fn test_arbitration_fees_held_tracked_per_token() {
+=======
+/// #465 — escalation must reject a course that is still Pending.
+#[test]
+#[should_panic(expected = "Error(Contract, #1)")]
+fn test_escalation_rejects_pending_course() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    client.set_arbitration_fee_config(&admin, &5_000_000);
+    let course_id = String::from_str(&env, "COURSE-ARB-PENDING");
+    client.register_course(
+        &instructor,
+        &course_id,
+        &1_000_000_000,
+        &token_id,
+        &0u32,
+        &None,
+        &BytesN::from_array(&env, &[1u8; 32]),
+        &soroban_sdk::Vec::new(&env),
+    );
+
+    let student = Address::generate(&env);
+    client.escalate_to_arbitration(&student, &course_id);
+}
+
+/// #465 — escalation must reject a course that has been Rejected.
+#[test]
+#[should_panic(expected = "Error(Contract, #1)")]
+fn test_escalation_rejects_rejected_course() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    client.set_arbitration_fee_config(&admin, &5_000_000);
+    let course_id = String::from_str(&env, "COURSE-ARB-REJECTED");
+    client.register_course(
+        &instructor,
+        &course_id,
+        &1_000_000_000,
+        &token_id,
+        &0u32,
+        &None,
+        &BytesN::from_array(&env, &[4u8; 32]),
+        &soroban_sdk::Vec::new(&env),
+    );
+    client.reject_course(
+        &admin,
+        &course_id,
+        &String::from_str(&env, "CONTENT_POLICY_VIOLATION"),
+    );
+
+    let student = Address::generate(&env);
+    client.escalate_to_arbitration(&student, &course_id);
+}
+
+/// #465 — escalation must reject a course whose token is no longer approved.
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_escalation_rejects_unapproved_token() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = setup_arbitration(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-ARB-UNAPPROVED-TOKEN",
+        5_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-ARB-UNAPPROVED-TOKEN");
+
+    client.remove_approved_token(&admin, &token_id);
+
+    client.escalate_to_arbitration(&student, &course_id);
+}
+
+/// #465 — escalation succeeds for an Active course with an approved token.
+#[test]
+fn test_escalation_active_course_approved_token_succeeds() {
+>>>>>>> pr/584
     let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
     let client = HamplardContractClient::new(&env, &contract_id);
 
@@ -12968,6 +13061,7 @@ fn test_arbitration_fees_held_tracked_per_token() {
         &token_id,
         &admin,
         &instructor,
+<<<<<<< HEAD
         "COURSE-ARB-HELD",
         fee_per_case,
     );
@@ -13142,6 +13236,26 @@ fn test_escalation_allows_historical_student() {
         .get_arbitration_case(&student, &course_id)
         .expect("historical student escalation must create a retrievable case");
     assert_eq!(case.caller, student);
+=======
+        "COURSE-ARB-ELIGIBLE",
+        fee_per_case,
+    );
+    let course_id = String::from_str(&env, "COURSE-ARB-ELIGIBLE");
+
+    let balance_before = token::Client::new(&env, &token_id).balance(&student);
+    client.escalate_to_arbitration(&student, &course_id);
+    let balance_after = token::Client::new(&env, &token_id).balance(&student);
+
+    assert_eq!(
+        balance_before - balance_after,
+        fee_per_case,
+        "eligible escalation must collect the configured fee"
+    );
+    let case = client
+        .get_arbitration_case(&student, &course_id)
+        .expect("eligible escalation must persist an arbitration case");
+    assert_eq!(case.status, DisputeStatus::Open);
+>>>>>>> pr/584
 }
 
 // ============================================================

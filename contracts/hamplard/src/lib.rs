@@ -351,6 +351,7 @@
 
 use soroban_sdk::{
 <<<<<<< HEAD
+<<<<<<< HEAD
     contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Map, String,
     Symbol, Vec,
 =======
@@ -439,6 +440,19 @@ pub use types::*;
 soroban_sdk::contractmeta!(key = "version", val = env!("CARGO_PKG_VERSION"));
 soroban_sdk::contractmeta!(key = "repo", val = "https://github.com/hamplard/hamplard");
 >>>>>>> pr/569
+=======
+    contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Map, String,
+    Symbol, Vec,
+};
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum HamplardError {
+    CourseNotActive = 1,
+    TokenNotApproved = 2,
+}
+>>>>>>> pr/584
 
 // ============================================================
 // FEE & RISK DATA TYPES
@@ -7862,6 +7876,7 @@ impl HamplardContract {
         let course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| panic!("course not found"));
 
+<<<<<<< HEAD
         // Only an enrolled student (current or historical) or the course
         // instructor may open a dispute on a course.
         let is_instructor = caller == course.instructor;
@@ -7882,6 +7897,20 @@ impl HamplardContract {
         }
 
 >>>>>>> pr/583
+=======
+        if course.status != CourseStatus::Active {
+            soroban_sdk::panic_with_error!(&env, HamplardError::CourseNotActive);
+        }
+
+        if !env
+            .storage()
+            .instance()
+            .has(&DataKey::ApprovedToken(course.token.clone()))
+        {
+            soroban_sdk::panic_with_error!(&env, HamplardError::TokenNotApproved);
+        }
+
+>>>>>>> pr/584
         // Reject duplicate open cases for the same (caller, course_id) pair.
         let case_key = ArbitrationCaseKey {
             caller: caller.clone(),
