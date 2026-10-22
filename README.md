@@ -2,11 +2,11 @@
 
 > **On-chain course enrollment, payments, and certificate issuance on Stellar Soroban**
 
-Hamplard is an online learning platform for practical vocational skills — tailoring, makeup artistry, baking, photography, hairstyling, nail technology, fashion design, and more. This Soroban smart contract handles the trustless financial and credential layer of the platform: course enrollment payments, automatic instructor revenue splits, and verifiable on-chain certificates of completion.
+Hamplard is an online learning platform for practical vocational skills — tailoring, makeup artistry, baking, photography, hairstyling, nail technology, fashion design, and more. This Soroban smart contract handles the trustless financial and credential layer of the platform: course enrollment payments, on-chain instructor earnings, refunds, and verifiable certificates of completion.
 
 ## Short version
 
-Hamplard Contracts is the Soroban smart contract layer for the Hamplard platform. It manages course lifecycle state, enrollment payments, instructor revenue splits, certificate issuance, and revocation in a trustless and auditable way.
+Hamplard Contracts is the Soroban smart contract layer for the Hamplard platform. It manages course lifecycle state, enrollment payments, pull-based instructor earnings, refunds, dispute fees, certificate issuance, and revocation in a trustless and auditable way.
 
 The contract provides the core rules for:
 
@@ -57,6 +57,7 @@ This is **Repo 1 of 3** in the Hamplard project:
 - [Refunds](#refunds)
 - [Certificate Verification](#certificate-verification)
 - [Events](#events)
+- [Error Codes](#error-codes)
 - [Project Structure](#project-structure)
 - [Prerequisites](#prerequisites)
 - [Setup & Installation](#setup--installation)
@@ -73,7 +74,7 @@ This is **Repo 1 of 3** in the Hamplard project:
 The Hamplard contract is the trust layer for the platform. It handles four responsibilities:
 
 **1. Course Registry**
-Instructors register courses on-chain with a price and fee structure. Each course starts as `Pending` — an admin must approve it before students can enroll. This gives the platform moderation control without being able to move anyone's funds.
+Instructors register courses on-chain with a price and fee structure. Each course starts as `Pending` — an admin must approve it before students can enroll. This gives the platform moderation control while payment rules remain enforced by the contract.
 
 **2. Enrollment Payments**
 When a student enrolls, the contract charges the course price and splits it in a single transaction:
@@ -83,7 +84,7 @@ When a student enrolls, the contract charges the course price and splits it in a
 The instructor share stays in the contract until each recipient calls `withdraw_earnings()`, which is what lets refunds debit the exact balances that were credited. The contract records the enrollment so no student can enroll twice.
 
 **3. On-Chain Certificates**
-After a student completes a course (verified off-chain by the backend), the admin issues an on-chain certificate. Each certificate is a permanent, verifiable record tied to the student's Stellar address and the course. Anyone can verify a certificate by querying `verify_certificate(certificate_id)` — no trusted middleman needed. Certificates can be revoked by the admin if issued in error.
+After a student completes a course (verified off-chain by the backend), the admin issues an on-chain certificate. Each certificate is a permanent, verifiable record tied to the student's Stellar address and the course. Anyone can verify a certificate by querying `verify_certificate(certificate_id)` — no trusted middleman needed. Certificates can be revoked by the admin if issued in error, subject to a challenge window.
 
 **4. Refunds**
 Both admins can jointly issue refunds by archiving a course and specifying which students to refund. Refunds return the full enrollment amount to students with incomplete enrollments. This provides dispute resolution and quality control mechanisms without requiring a time window.
@@ -117,14 +118,14 @@ This keeps the contract small, cheap to call, and focused on what blockchains ar
 │  ┌──────────────┐   ┌──────────────────┐   ┌─────────────┐  │
 │  │   Course     │   │   Enrollment     │   │ Certificate │  │
 │  │   Registry   │   │   + Payment      │   │   Issuance  │  │
-│  │  (Pending →  │   │   Split          │   │  (on-chain  │  │
-│  │   Active)    │   │  (instant)       │   │   NFT-like) │  │
+│  │  (Pending →  │   │  Fee + earnings  │   │  (on-chain  │  │
+│  │   Active)    │   │  credit          │   │   NFT-like) │  │
 │  └──────────────┘   └──────────────────┘   └─────────────┘  │
 └──────────────────────────────────────────────────────────────┘
          ↑                    ↑                    ↑
     Instructor           Student pays         Admin issues
     registers            at enroll           after backend
-    course               (auto-split)        verifies completion
+    course               (fee + credit)      verifies completion
 ```
 
 ### Roles
@@ -324,7 +325,7 @@ Initialises the contract once. The admin must sign.
 | `set_arbitration_fee_config(admin, fee_per_case)` | Admin | Arbitration fee |
 | `set_risk_config_enabled(admin, enabled)` / `set_risk_fee_config(...)` | Admin | Risk-surcharge pricing |
 
-### Admin management
+### Governance, safety, and upgrades
 
 | Function | Caller | Description |
 |---|---|---|
@@ -465,7 +466,7 @@ stellar contract invoke \
   --certificate_id "CERT-12345-TAILORING"
 ```
 
-Returns `true` if the certificate exists and has not been revoked. The `get_certificate()` function returns the full record including the student's Stellar address, course title, instructor, and issuance ledger — all permanently recorded and independently auditable.
+Returns `true` if the certificate exists, has not expired, and has not been permanently revoked. A certificate with a pending revocation remains verifiable until its challenge deadline passes. The `get_certificate()` function returns the full record including the student's Stellar address, course title, instructor, and issuance ledger — all permanently recorded and independently auditable.
 
 ---
 
@@ -485,7 +486,72 @@ Returns `true` if the certificate exists and has not been revoked. The `get_cert
 | `course_certificates_revoked` | `(admin, course_id, revoked_count, ledger)` | All certificates of a course bulk-revoked |
 | `admin_transferred`           | `new_admin`                                 | Admin role transferred                    |
 
-The backend listens to these events and updates the database, sends notifications, and triggers email confirmations.
+See `contracts/hamplard/src/lib.rs` for the complete event list, including waitlist, freeze, blocklist, approver, and configuration events.
+
+---
+
+## Error Codes
+
+Every contract failure is reported as a stable numeric `Error` code. Soroban surfaces these as:
+
+```
+HostError: Error(Contract, #N)
+```
+
+Clients should match on `N`; the numeric values are part of the public interface and do not change once assigned.
+
+| Code | Name | Meaning |
+|---:|---|---|
+| 1 | `AlreadyInitialized` | `init` has already been called |
+| 2 | `Unauthorized` | Caller is missing the required role or authorization |
+| 3 | `AdminExpired` | The admin role has reached its configured expiry |
+| 4 | `InvalidAdminConfig` | Invalid admin pair, proposal, or transfer state |
+| 5 | `InvalidFeeConfig` | Fee rate, bps value, or arbitration fee is invalid |
+| 6 | `InvalidTreasury` | Treasury address is invalid or not configured |
+| 7 | `CourseNotFound` | No active or archived course exists for the ID |
+| 8 | `InstructorFrozen` | The instructor is frozen |
+| 9 | `InstructorState` | Invalid freeze/unfreeze state transition |
+| 10 | `ArchivedCourseImmutable` | An archived course cannot be modified |
+| 11 | `InvalidCourseInput` | Malformed course ID, capacity, categories, or hash |
+| 12 | `InvalidPrice` | Price is outside the allowed precision range |
+| 13 | `CourseAlreadyRegistered` | Course ID is already in use |
+| 14 | `CourseIdInCooldown` | Archived course ID is still in its re-registration cooldown |
+| 15 | `InstructorCourseLimitReached` | Instructor has reached the course limit |
+| 16 | `GovernanceWindowNotElapsed` | Required approval/review delay has not elapsed |
+| 17 | `CourseNotPending` | Operation requires a pending course |
+| 18 | `HighValueApprovalConflict` | The same approver cannot provide both high-value approvals |
+| 19 | `CounterUnderflow` | A counter would be decremented below zero |
+| 20 | `CourseNotActive` | Operation requires an active course |
+| 21 | `CourseNotPaused` | Operation requires a paused course |
+| 22 | `InvalidCourseTransfer` | Invalid course ownership transfer |
+| 23 | `CourseMustBePausedToArchive` | Active courses must be paused before archiving |
+| 24 | `TooManyRefundStudents` | Refund list exceeds the maximum size |
+| 25 | `ArithmeticOverflow` | Checked arithmetic overflow |
+| 26 | `InvalidPrerequisite` | Prerequisite is invalid, missing, or incomplete |
+| 27 | `EmptyBatch` | Batch enrollment list is empty |
+| 28 | `BatchTooLarge` | Batch or list exceeds the maximum size |
+| 29 | `DuplicateCourseInBatch` | Batch contains duplicate course IDs |
+| 30 | `PlatformPaused` | Platform enrollment is paused or pause state is invalid |
+| 31 | `StudentBlocked` | Student is blocked or block state is invalid |
+| 32 | `EntryRestricted` | Address is not allowed to enroll or join a waitlist |
+| 33 | `InstructorReferenceInvalid` | Invalid instructor reference |
+| 34 | `CourseNotAvailable` | Course is not enrollable (status, timing, capacity, token, or cap) |
+| 35 | `AlreadyEnrolled` | Student is already enrolled |
+| 36 | `CircuitBreakerTripped` | Repeated payment failures auto-paused the course |
+| 37 | `TransferAmountMismatch` | Token transfer delivered an unexpected amount |
+| 38 | `EnrollmentNotFound` | No enrollment exists for the student/course pair |
+| 39 | `EnrollmentStateError` | Completion or enrollment-state transition is invalid |
+| 40 | `InvalidWithdrawal` | Withdrawal amount, destination, or balance is invalid |
+| 41 | `InvalidCertificateInput` | Malformed certificate field |
+| 42 | `CertificateAlreadyIssued` | Certificate already exists or was already issued |
+| 43 | `MaxCertificatesReached` | Course certificate cap reached |
+| 44 | `CertificateError` | Revocation, challenge, or certificate lookup failed |
+| 45 | `RefundError` | Refund window, request state, or amount is invalid |
+| 46 | `ApproverState` | Approver add/remove operation conflicts with current state |
+| 47 | `ArbitrationError` | Arbitration config or case state is invalid |
+| 48 | `WaitlistError` | Waitlist operation is invalid |
+| 49 | `UpgradeError` | Upgrade proposal, timelock, or execution state is invalid |
+| 50 | `InconsistentState` | Internal invariant or reserved-balance check failed |
 
 ---
 
@@ -561,7 +627,10 @@ and a final `test result: ok.` summary (300+ tests).
 
 ## Building
 
+The Makefile lives in `contracts/hamplard`:
+
 ```bash
+cd contracts/hamplard
 make build      # → target/wasm32v1-none/release/hamplard.wasm
 make optimize   # → target/wasm32v1-none/release/hamplard.optimized.wasm
 ```
@@ -571,12 +640,15 @@ make optimize   # → target/wasm32v1-none/release/hamplard.optimized.wasm
 ## Deploying to Testnet
 
 ```bash
+cd contracts/hamplard
 export STELLAR_ACCOUNT=my-account
 make deploy-testnet
 # → CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 ```
 
 ### Initialize after deployment
+
+Run the following from `contracts/hamplard`:
 
 ```bash
 stellar contract invoke \
@@ -643,17 +715,21 @@ stellar contract invoke \
 
 ## Roadmap
 
-- [x] Course registry with approval workflow
-- [x] Enrollment payment with automatic split
-- [x] On-chain certificate issuance and verification
-- [x] Course pause/unpause by instructor or admin
-- [x] Certificate revocation
-- [x] 14+ unit tests
+- [x] Course registry with approval and rejection workflow
+- [x] Enrollment payment with platform fee + instructor earnings credit
+- [x] Instructor earnings withdrawal tracking
+- [x] Batch enrollment and re-enrollment
+- [x] On-chain certificate issuance, revocation, and challenge window
+- [x] Course pause/unpause and permanent archive
+- [x] Refund requests with admin approval
+- [x] Waitlists, prerequisites, capacity limits, and enrollment windows
+- [x] Arbitration fee configuration and per-token fee reserves
+- [x] Two-admin governance, approvers, admin expiry, blocklist, and instructor freeze
+- [x] Time-locked contract upgrade mechanism
+- [x] 313 unit tests
 - [ ] Discount codes / coupon system (Soroban-based)
 - [ ] Subscription enrollment model (monthly access)
-- [ ] Instructor revenue withdrawal tracking
-- [ ] Course bundle enrollments (enroll in multiple courses at once)
-- [ ] Contract upgrade mechanism
+- [ ] Co-instructor revenue shares and payouts
 - [ ] Mainnet deployment
 
 ---
