@@ -2573,6 +2573,38 @@ impl HamplardContract {
         );
     }
 
+    /// Cancel a pending treasury update before it takes effect.
+    ///
+    /// Requires both admin signatures, mirroring `update_treasury`. Once
+    /// cancelled, the current `Treasury` address remains in effect and all
+    /// future enrollments continue routing platform fees to it. Panics if
+    /// there is no pending treasury update to cancel.
+    ///
+    /// # Arguments
+    /// - `admin1` — first admin (must sign)
+    /// - `admin2` — second admin (must sign)
+    pub fn cancel_treasury_update(env: Env, admin1: Address, admin2: Address) {
+        admin1.require_auth();
+        admin2.require_auth();
+        Self::require_multi_admin(&env, &admin1, &admin2);
+        env.storage()
+            .instance()
+            .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
+
+        let pending: TreasuryUpdate = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingTreasury)
+            .unwrap_or_else(|| panic!("no pending treasury update"));
+
+        env.storage().instance().remove(&DataKey::PendingTreasury);
+
+        env.events().publish(
+            (Symbol::new(&env, "treasury_update_cancelled"), admin1.clone()),
+            (pending.address, pending.effective_ledger, admin1, admin2),
+        );
+    }
+
     /// Instructor or admin updates course details (e.g. price, capacity).
     /// Increments the course version so prior student enrollments remain bound to
     /// their original enrollment terms.
