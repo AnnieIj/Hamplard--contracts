@@ -262,6 +262,8 @@ Pending ── archive_course() ──→ Archived (no enrollments exist)
 Rejected ─ archive_course() ──→ Archived (no enrollments exist)
 ```
 
+Archiving requires the course to be in `Paused`, `Pending`, or `Rejected` status — an `Active` course cannot be archived directly. The operation also requires both admin addresses (multi-sig). `Archived` is a terminal state; no further transitions are possible.
+
 ---
 
 ## Contract Functions
