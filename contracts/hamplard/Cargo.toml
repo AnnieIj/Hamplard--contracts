@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 description = "Hamplard — On-chain course enrollment, payments, and certificate issuance on Stellar Soroban"
 authors = ["Hamplard Team"]
+repository = "https://github.com/hamplard/hamplard"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -14,4 +15,6 @@ doctest = false
 soroban-sdk = { workspace = true }
 
 [dev-dependencies]
-soroban-sdy = { workspace = true, features = ["testutils"] }
+soroban-sdk = { workspace = true, features = ["testutils"] }
+proptest = "1.4"
+soroban-sdk = { workspace = true, features = ["testutils"] }
