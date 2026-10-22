@@ -3124,6 +3124,21 @@ impl HamplardContract {
             panic!("instructor is frozen");
         }
 
+        // Verify that the immutable instructor reference recorded at
+        // registration still matches the course's current instructor field.
+        // This is the same integrity guard that validate_enrollment() runs
+        // for enroll() — re_enroll() must enforce it too so that a tampered
+        // or inconsistent course record cannot be exploited on re-enrollment.
+        let registered_instructor: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::CourseInstructorRef(course_id.clone()))
+            .unwrap_or_else(|| panic!("course instructor reference not found"));
+
+        if registered_instructor != course.instructor {
+            panic!("course instructor reference mismatch");
+        }
+
         if student == course.instructor {
             panic!("instructor cannot enroll in own course");
         }
