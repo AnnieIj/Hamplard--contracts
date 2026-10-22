@@ -561,8 +561,13 @@ pub struct Course {
     /// Optional enrollment expiry duration in ledger sequences.
     /// If set, an enrollment is considered inactive (expired) after
     /// `enrolled_at_ledger + enrollment_expiry_ledgers` ledgers.
-    /// Expired enrollments cannot be marked completed and are treated
-    /// as inactive, freeing the conceptual course slot.
+    /// Expired enrollments cannot be marked completed and `has_completed()`
+    /// returns `Some(false)` for them.
+    ///
+    /// Expiry alone does not remove the enrollment record or free a
+    /// `max_capacity` slot: capacity is checked against `total_enrollments`.
+    /// A student with an expired enrollment can start a new attempt through
+    /// `re_enroll()`, which archives the expired record.
     pub enrollment_expiry_ledgers: Option<u32>,
     /// Minimum ledger sequences that must elapse between a student's
     /// enroll() and mark_completed() for this course. Captured from the
@@ -787,9 +792,11 @@ pub enum DataKey {
     PendingSecondaryAdmin,
     /// Platform paused state flag
     PlatformPaused,
-    /// Accumulated instructor earnings per (instructor, token) pair (in stroops)
+    /// Withdrawable instructor earnings per (instructor, token) pair (in stroops)
     InstructorEarnings(Address, Address),
-    /// Accumulated instructor earnings across all tokens (in stroops)
+    /// Lifetime net instructor earnings across all tokens (in stroops).
+    /// Increases when instructor revenue is credited and decreases on refunds.
+    /// Withdrawals do not change this value.
     InstructorTotalEarnings(Address),
     /// Number of courses registered by an instructor
     InstructorCourseCount(Address),
@@ -818,7 +825,8 @@ pub enum DataKey {
     /// Ordered list of all registered course IDs (on-chain catalog)
     CourseList,
     /// Archived past `Enrollment` records for a (student, course_id) pair,
-    /// preserved when a completed student re-enrolls via `re_enroll()`.
+    /// preserved when a completed or expired student re-enrolls via
+    /// `re_enroll()`.
     EnrollmentHistory(Address, String),
     /// Aggregate reputation stats for an instructor (total students,
     /// completions, certificates issued) — see `InstructorStats`.
@@ -3391,14 +3399,17 @@ impl HamplardContract {
         actual_amount_paid
     }
     ///
-    /// Unlike `enroll()`, this is allowed even though a completed
-    /// `Enrollment` record already exists for this (student, course_id)
-    /// pair. The prior completed record — including its evidence hash and
-    /// certificate linkage — is archived to `EnrollmentHistory` before a
-    /// fresh `Enrollment` is created, so nothing about the original
-    /// completion or any certificate already issued for it is overwritten.
-    /// The student is charged again, exactly as for a first-time
-    /// enrollment.
+    /// Unlike `enroll()`, this is allowed even though an `Enrollment` record
+    /// already exists for this (student, course_id) pair when that record is
+    /// completed or has expired. The prior record — including evidence hash
+    /// and certificate linkage for completed attempts — is archived to
+    /// `EnrollmentHistory` before a fresh `Enrollment` is created, so nothing
+    /// about the original attempt or any certificate already issued for it
+    /// is overwritten. The student is charged again, exactly as for a
+    /// first-time enrollment.
+    ///
+    /// An incomplete, unexpired enrollment must still be completed before
+    /// re-enrolling.
     ///
     /// # Arguments
     /// - `student`   — student's Stellar address (must sign)
@@ -3470,8 +3481,15 @@ impl HamplardContract {
             .get(&enrollment_key)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::EnrollmentStateError));
 
+<<<<<<< HEAD
         if !previous_enrollment.completed {
             soroban_sdk::panic_with_error!(&env, Error::EnrollmentStateError);
+=======
+        let previous_enrollment_expired =
+            Self::is_enrollment_expired(&env, &course, &previous_enrollment);
+        if !previous_enrollment.completed && !previous_enrollment_expired {
+            panic!("current enrollment has not been completed yet");
+>>>>>>> pr/577
         }
 
         if let Some(cap) = course.max_capacity {
@@ -3561,6 +3579,7 @@ impl HamplardContract {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                 panic!("token transfer amount mismatch");
 =======
 >>>>>>> pr/557
@@ -3574,6 +3593,8 @@ impl HamplardContract {
 >>>>>>> pr/568
 =======
 >>>>>>> pr/573
+=======
+>>>>>>> pr/577
                 return;
             }
 
@@ -3586,8 +3607,11 @@ impl HamplardContract {
             }
         }
 
-        // Archive the completed enrollment — including its evidence hash
-        // and certificate_id linkage — before it is overwritten.
+        let previous_was_completed = previous_enrollment.completed;
+
+        // Archive the prior enrollment — completed or expired — before it is
+        // overwritten. Completed attempts keep their evidence hash and
+        // certificate_id linkage; expired attempts remain incomplete.
         let history_key = DataKey::EnrollmentHistory(student.clone(), course_id.clone());
         let mut history: Vec<Enrollment> = env
             .storage()
@@ -3620,7 +3644,18 @@ impl HamplardContract {
         course.total_enrollments = course
             .total_enrollments
             .checked_add(1)
+<<<<<<< HEAD
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::ArithmeticOverflow));
+=======
+            .unwrap_or_else(|| panic!("enrollment count overflow"));
+
+        // A completed attempt was already removed from the active counters
+        // by mark_completed(). An expired attempt is still counted as active,
+        // so release that slot before counting the new enrollment.
+        if !previous_was_completed && course.active_enrollments > 0 {
+            course.active_enrollments -= 1;
+        }
+>>>>>>> pr/577
         course.active_enrollments = course
             .active_enrollments
             .checked_add(1)
@@ -3632,12 +3667,30 @@ impl HamplardContract {
         course.last_updated_ledger = env.ledger().sequence();
         Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
+<<<<<<< HEAD
         // Increment platform-wide active enrollment counter
 <<<<<<< HEAD
         let total_active: u32 = Self::read_total_active_enrollments(&env);
         Self::write_total_active_enrollments(
             &env,
             total_active
+=======
+        // Update platform-wide active enrollment counter. Replacing an
+        // expired attempt is net-zero; re-enrolling after completion adds one.
+        let total_active: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalActiveEnrollments)
+            .unwrap_or(0);
+        let total_active = if !previous_was_completed && total_active > 0 {
+            total_active - 1
+        } else {
+            total_active
+        };
+        env.storage().instance().set(
+            &DataKey::TotalActiveEnrollments,
+            &(total_active
+>>>>>>> pr/577
                 .checked_add(1)
                 .expect("platform enrollment counter overflow"),
         );
@@ -3673,6 +3726,10 @@ impl HamplardContract {
     /// `destination` is where the funds are sent. `None` sends them to
     /// `instructor` (previous behaviour). Only the instructor must sign;
     /// the destination does not need to authorize anything. (#349)
+    ///
+    /// Frozen instructors cannot withdraw until an admin unfreezes them.
+    /// Withdrawals reduce `get_instructor_earnings()` but do not change
+    /// `get_instructor_total_earnings()`.
     pub fn withdraw_earnings(
         env: Env,
         instructor: Address,
@@ -3681,6 +3738,10 @@ impl HamplardContract {
         destination: Option<Address>,
     ) {
         instructor.require_auth();
+
+        if Self::is_instructor_frozen_internal(&env, &instructor) {
+            panic!("instructor is frozen");
+        }
 
         if amount < 0 {
             soroban_sdk::panic_with_error!(&env, Error::InvalidWithdrawal);
@@ -3740,7 +3801,8 @@ impl HamplardContract {
         );
     }
 
-    /// Get accumulated earnings for an instructor and token pair
+    /// Get the currently withdrawable earnings for an instructor and token.
+    /// This balance is reduced by `withdraw_earnings()` and by refunds.
     pub fn get_instructor_earnings(env: Env, instructor: Address, token: Address) -> i128 {
         env.storage()
             .persistent()
@@ -3748,7 +3810,12 @@ impl HamplardContract {
             .unwrap_or(0)
     }
 
-    /// Get accumulated earnings for an instructor across all tokens
+    /// Get the instructor's lifetime net earnings across all tokens.
+    ///
+    /// This is a cumulative figure: it increases when instructor revenue is
+    /// credited and decreases when a refund debits the instructor's share.
+    /// Withdrawing earnings does **not** reduce this value. Use
+    /// `get_instructor_earnings()` for the currently withdrawable balance.
     pub fn get_instructor_total_earnings(env: Env, instructor: Address) -> i128 {
         env.storage()
             .persistent()
@@ -3889,6 +3956,7 @@ impl HamplardContract {
         }
 
         // Check enrollment expiry — expired enrollments cannot be completed
+<<<<<<< HEAD
         if let Some(expiry_ledgers) = course.enrollment_expiry_ledgers {
             let expiry_at = enrollment
                 .enrolled_at_ledger
@@ -3897,6 +3965,10 @@ impl HamplardContract {
             if env.ledger().sequence() >= expiry_at {
                 soroban_sdk::panic_with_error!(&env, Error::EnrollmentStateError);
             }
+=======
+        if Self::is_enrollment_expired(&env, &course, &enrollment) {
+            panic!("enrollment has expired");
+>>>>>>> pr/577
         }
 
         enrollment.completed = true;
@@ -6110,9 +6182,9 @@ impl HamplardContract {
             .get(&DataKey::Enrollment(student, course_id))
     }
 
-    /// Get the archived enrollment history (past completed attempts) for a
-    /// student/course pair, populated by `re_enroll()`. Access follows the
-    /// same rules as `get_enrollment`.
+    /// Get the archived enrollment history (past completed or expired
+    /// attempts) for a student/course pair, populated by `re_enroll()`.
+    /// Access follows the same rules as `get_enrollment`.
     pub fn get_enrollment_history(
         env: Env,
         caller: Address,
@@ -6186,8 +6258,22 @@ impl HamplardContract {
     pub fn has_completed(env: Env, student: Address, course_id: String) -> Option<bool> {
         env.storage()
             .persistent()
+<<<<<<< HEAD
             .get::<DataKey, Enrollment>(&DataKey::Enrollment(student, course_id))
             .map(|enrollment| enrollment.completed)
+=======
+            .get::<DataKey, Enrollment>(&DataKey::Enrollment(student, course_id.clone()))
+        {
+            if enrollment.completed {
+                return Some(true);
+            }
+            // Not yet completed — expired and active-but-incomplete both
+            // report `Some(false)`.
+            Some(false)
+        } else {
+            None
+        }
+>>>>>>> pr/577
     }
 
     /// Verify a certificate — returns true if it exists, has not been
@@ -6368,6 +6454,19 @@ impl HamplardContract {
             .persistent()
             .get(&DataKey::Enrollment(student.clone(), course_id.clone()))
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::EnrollmentNotFound))
+    }
+
+    fn is_enrollment_expired(env: &Env, course: &Course, enrollment: &Enrollment) -> bool {
+        match course.enrollment_expiry_ledgers {
+            Some(expiry_ledgers) => {
+                let expiry_at = enrollment
+                    .enrolled_at_ledger
+                    .checked_add(expiry_ledgers)
+                    .unwrap_or(u32::MAX);
+                env.ledger().sequence() >= expiry_at
+            }
+            None => false,
+        }
     }
 
     fn is_instructor_frozen_internal(env: &Env, instructor: &Address) -> bool {
@@ -6735,11 +6834,15 @@ impl HamplardContract {
             Self::PERSISTENT_TTL_THRESHOLD,
             Self::PERSISTENT_TTL_EXTEND_TO,
         );
+<<<<<<< HEAD
 =======
             .unwrap_or_else(|| panic!("overflow computing instructor earnings"));
         Self::persist(&env, &key, &new_balance);
 >>>>>>> pr/563
         // Also update the per-instructor total earnings accumulator
+=======
+        // Also update the lifetime net earnings accumulator.
+>>>>>>> pr/577
         let total_key = DataKey::InstructorTotalEarnings(instructor.clone());
         let current_total: i128 = env.storage().persistent().get(&total_key).unwrap_or(0);
         let new_total = current_total
@@ -6917,6 +7020,22 @@ impl HamplardContract {
         } else {
             env.storage().persistent().set(&key, &new_balance);
         }
+<<<<<<< HEAD
+=======
+        // Refunds reduce lifetime net earnings as well as the withdrawable
+        // balance. Withdrawals never touch this accumulator.
+        let total_key = DataKey::InstructorTotalEarnings(instructor.clone());
+        let current_total: i128 = env.storage().persistent().get(&total_key).unwrap_or(0);
+        if amount > current_total {
+            panic!("inconsistent instructor total earnings state");
+        }
+        let new_total = current_total - amount;
+        if new_total == 0 {
+            env.storage().persistent().remove(&total_key);
+        } else {
+            env.storage().persistent().set(&total_key, &new_total);
+        }
+>>>>>>> pr/577
     }
 
     /// Load an instructor's reputation stats, apply `f`, and persist the result.

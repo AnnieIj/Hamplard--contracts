@@ -5,15 +5,9 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
 ### Storage layout change
 
 - `Course` gains two fields, `total_refunded: i128` and `refund_count: u32`, updated by both refund paths (`process_refund` and `archive_course`) so admins can read per-course refund rates on-chain via `get_course`. `Course` is a `#[contracttype]` struct, so courses stored before this change lack the new keys and will not deserialize against the new type; redeploy fresh, or migrate existing `Course` / `ArchivedCourse` entries before upgrading a live contract.
-=======
-### Added
-
-- `get_treasury()` returns the effective platform treasury and `get_pending_treasury()` returns the scheduled treasury update that has not yet taken effect, so clients no longer need to read raw storage.
->>>>>>> pr/562
 =======
 ### Added
 - CPU and memory benchmark baselines for enrollment, batch enrollment, archiving with refunds, and large-catalog registration in `docs/BENCHMARKS.md`.
@@ -64,3 +58,10 @@
 
 ### Changed
 - Enrollment counter updates now use shared `inc_total_active` / `dec_total_active` helpers.
+
+
+### Fixed
+- Define `InstructorTotalEarnings` as lifetime net earnings: refunds reduce it, withdrawals do not, and the getter documents the distinction from the withdrawable per-token balance. (#344)
+- Frozen instructors can no longer withdraw earnings until an admin unfreezes them. (#342)
+- Correct the enrollment-expiry documentation: expiry does not remove the record or free a capacity slot. (#339)
+- Allow `re_enroll()` to replace an expired enrollment, archiving the expired record to `EnrollmentHistory`. (#338)
