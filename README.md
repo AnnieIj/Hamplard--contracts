@@ -646,8 +646,15 @@ make optimize   # → target/wasm32v1-none/release/hamplard.optimized.wasm
 ```bash
 cd contracts/hamplard
 export STELLAR_ACCOUNT=my-account
-make deploy-testnet
-# → CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+export ADMIN_ADDRESS=<ADMIN_ADDRESS>
+export SECONDARY_ADMIN_ADDRESS=<SECONDARY_ADMIN_ADDRESS>
+export TREASURY_ADDRESS=<TREASURY_ADDRESS>
+export DEFAULT_FEE_PCT=20
+export MAX_COURSES_PER_INSTRUCTOR=10
+export REFUND_WINDOW_LEDGERS=17280
+export REVOCATION_CHALLENGE_PERIOD=17280
+make -C contracts/hamplard deploy-and-init-testnet
+# Prints the initialized contract ID and configuration
 ```
 
 ### Initialize after deployment

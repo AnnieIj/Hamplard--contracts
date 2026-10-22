@@ -5,7 +5,11 @@ CONTRACT_NAME = hamplard
 WASM_PATH     = target/wasm32v1-none/release/$(CONTRACT_NAME).wasm
 WASM_OPT      = target/wasm32v1-none/release/$(CONTRACT_NAME).optimized.wasm
 
+<<<<<<< HEAD
 .PHONY: test build optimize deploy-testnet clean fmt fmt-check check lint snapshots
+=======
+.PHONY: test build optimize deploy-testnet deploy-and-init-testnet clean fmt check
+>>>>>>> pr/603
 
 test:
 	cargo test
@@ -22,6 +26,9 @@ deploy-testnet: optimize
 		--wasm $(WASM_OPT) \
 		--source $(STELLAR_ACCOUNT) \
 		--network $(NETWORK)
+
+deploy-and-init-testnet: optimize
+	NETWORK="$(NETWORK)" sh ./scripts/deploy-testnet.sh "$(WASM_OPT)"
 
 fmt:
 	cargo fmt
