@@ -1462,6 +1462,165 @@ fn test_multiple_students_same_course() {
 // NEW TESTS FOR ADDED FEATURES
 // ============================================================
 
+// ============================================================
+// #503 — INSTRUCTOR REPUTATION STATS COVERAGE
+// ============================================================
+
+/// An instructor with no activity reads as all-zero rather than panicking.
+#[test]
+fn test_instructor_stats_zero_for_unknown_instructor() {
+    let (env, contract_id, _token_id, _admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let stranger = Address::generate(&env);
+    let stats = client.get_instructor_stats(&stranger);
+    assert_eq!(stats.total_students, 0);
+    assert_eq!(stats.total_completions, 0);
+    assert_eq!(stats.total_certificates, 0);
+}
+
+/// Students and completions are aggregated across every course the instructor
+/// owns, not just the most recent one.
+#[test]
+fn test_instructor_stats_aggregate_across_courses() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let asset_client = token::StellarAssetClient::new(&env, &token_id);
+    let course_a = String::from_str(&env, "COURSE-STATS-A");
+    let course_b = String::from_str(&env, "COURSE-STATS-B");
+
+    register_and_approve_course(&env, &client, &token_id, &admin, &instructor, "COURSE-STATS-A", 100_000_000);
+    register_and_approve_course(&env, &client, &token_id, &admin, &instructor, "COURSE-STATS-B", 100_000_000);
+
+    // Two students in course A, one in course B.
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+    for s in [&alice, &bob, &carol] {
+        asset_client.mint(s, &100_000_000_000);
+    }
+    client.enroll(&alice, &course_a);
+    client.enroll(&bob, &course_a);
+    client.enroll(&carol, &course_b);
+
+    let stats = client.get_instructor_stats(&instructor);
+    assert_eq!(stats.total_students, 3, "students count across both courses");
+    assert_eq!(stats.total_completions, 0);
+    assert_eq!(stats.total_certificates, 0);
+
+    // Completing one enrollment in each course is two completions.
+    client.mark_completed(&admin, &alice, &course_a, &Some(evidence_hash(&env, "a")));
+    client.mark_completed(&admin, &carol, &course_b, &Some(evidence_hash(&env, "b")));
+
+    let stats = client.get_instructor_stats(&instructor);
+    assert_eq!(stats.total_students, 3);
+    assert_eq!(stats.total_completions, 2);
+    assert_eq!(stats.total_certificates, 0);
+
+    // Issuing one certificate for each completion moves the certificate count.
+    client.issue_certificate(
+        &admin,
+        &alice,
+        &course_a,
+        &String::from_str(&env, "CERT-STATS-A"),
+        &String::from_str(&env, "Course A"),
+        &get_enrollment_ref(&env, &client, &alice, "COURSE-STATS-A"),
+        &None,
+        &None,
+    );
+    client.issue_certificate(
+        &admin,
+        &carol,
+        &course_b,
+        &String::from_str(&env, "CERT-STATS-B"),
+        &String::from_str(&env, "Course B"),
+        &get_enrollment_ref(&env, &client, &carol, "COURSE-STATS-B"),
+        &None,
+        &None,
+    );
+
+    let stats = client.get_instructor_stats(&instructor);
+    assert_eq!(stats.total_students, 3);
+    assert_eq!(stats.total_completions, 2);
+    assert_eq!(stats.total_certificates, 2);
+}
+
+/// Stats are keyed per instructor: one instructor's activity must never leak
+/// into another instructor's reputation numbers.
+#[test]
+fn test_instructor_stats_are_isolated_per_instructor() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let other_instructor = Address::generate(&env);
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+
+    register_and_approve_course(&env, &client, &token_id, &admin, &instructor, "COURSE-ISO-A", 100_000_000);
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &other_instructor,
+        "COURSE-ISO-B",
+        100_000_000,
+    );
+
+    client.enroll(&student, &String::from_str(&env, "COURSE-ISO-A"));
+    client.mark_completed(
+        &admin,
+        &student,
+        &String::from_str(&env, "COURSE-ISO-A"),
+        &Some(evidence_hash(&env, "iso")),
+    );
+
+    let active = client.get_instructor_stats(&instructor);
+    assert_eq!(active.total_students, 1);
+    assert_eq!(active.total_completions, 1);
+
+    // The other instructor registered a course but never taught anyone.
+    let idle = client.get_instructor_stats(&other_instructor);
+    assert_eq!(idle.total_students, 0);
+    assert_eq!(idle.total_completions, 0);
+    assert_eq!(idle.total_certificates, 0);
+}
+
+/// A re-enrollment is a fresh student entry for the instructor, so the student
+/// counter moves while completions stay as they were until the new run ends.
+#[test]
+fn test_instructor_stats_track_re_enrollment() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+    let course_id = String::from_str(&env, "COURSE-STATS-RE");
+
+    register_and_approve_course(&env, &client, &token_id, &admin, &instructor, "COURSE-STATS-RE", 100_000_000);
+
+    client.enroll(&student, &course_id);
+    client.mark_completed(&admin, &student, &course_id, &Some(evidence_hash(&env, "first")));
+
+    let stats = client.get_instructor_stats(&instructor);
+    assert_eq!(stats.total_students, 1);
+    assert_eq!(stats.total_completions, 1);
+
+    client.re_enroll(&student, &course_id);
+
+    let stats = client.get_instructor_stats(&instructor);
+    assert_eq!(
+        stats.total_students, 2,
+        "a re-enrollment is a second student entry for the instructor"
+    );
+    assert_eq!(
+        stats.total_completions, 1,
+        "the archived completion is not re-counted as a new completion"
+    );
+    assert_eq!(stats.total_certificates, 0);
+}
+
 #[test]
 fn test_instructor_total_earnings_across_courses() {
     let (env, contract_id, token_id, admin, sec_admin, treasury, instructor) = setup();
