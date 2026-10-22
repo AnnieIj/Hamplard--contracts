@@ -5430,6 +5430,11 @@ impl HamplardContract {
     pub fn update_max_courses_limit(env: Env, admin: Address, new_max: u32) {
         admin.require_auth();
         Self::require_admin(&env, &admin, "update_max_courses_limit");
+        let old_max: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MaxCoursesPerInstructor)
+            .unwrap_or(50);
         env.storage()
             .instance()
             .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
@@ -5442,7 +5447,7 @@ impl HamplardContract {
                 Symbol::new(&env, "max_courses_limit_updated"),
                 admin.clone(),
             ),
-            (admin, new_max),
+            (admin, old_max, new_max),
         );
     }
 
@@ -5659,6 +5664,8 @@ impl HamplardContract {
         admin2.require_auth();
         Self::require_multi_admin(&env, &admin1, &admin2);
 
+        let old_expiry: Option<u32> = env.storage().instance().get(&DataKey::AdminExpiresAt);
+
         if let Some(expiry) = expires_at {
             if expiry <= env.ledger().sequence() {
                 soroban_sdk::panic_with_error!(&env, Error::InvalidAdminConfig);
@@ -5672,7 +5679,7 @@ impl HamplardContract {
 
         env.events().publish(
             (Symbol::new(&env, "admin_expiry_set"), admin1.clone()),
-            (admin1, admin2, expires_at),
+            (admin1, admin2, old_expiry, expires_at),
         );
     }
 
@@ -5721,6 +5728,8 @@ impl HamplardContract {
         admin.require_auth();
         Self::require_admin(&env, &admin, "set_platform_enrollment_cap");
 
+        let old_cap: Option<u32> = env.storage().instance().get(&DataKey::PlatformEnrollmentCap);
+
         if let Some(cap_value) = cap {
             env.storage()
                 .instance()
@@ -5736,7 +5745,7 @@ impl HamplardContract {
                 Symbol::new(&env, "platform_enrollment_cap_set"),
                 admin.clone(),
             ),
-            (admin, cap),
+            (admin, old_cap, cap),
         );
     }
 
@@ -5796,7 +5805,15 @@ impl HamplardContract {
 
         admin.require_auth();
         Self::require_admin(&env, &admin, "update_min_review_delay");
+<<<<<<< HEAD
         assert!(delay <= MAX_REVIEW_DELAY_LEDGERS, "review delay exceeds maximum");
+=======
+        let old_delay: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinReviewDelay)
+            .unwrap_or(0);
+>>>>>>> pr/595
         env.storage()
             .instance()
             .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
@@ -5806,7 +5823,7 @@ impl HamplardContract {
 
         env.events().publish(
             (Symbol::new(&env, "min_review_delay_updated"), admin.clone()),
-            (admin, delay),
+            (admin, old_delay, delay),
         );
     }
 
@@ -5825,6 +5842,11 @@ impl HamplardContract {
     pub fn update_min_completion_ledgers(env: Env, admin: Address, ledgers: u32) {
         admin.require_auth();
         Self::require_admin(&env, &admin, "update_min_completion_ledgers");
+        let old_ledgers: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::DefaultMinCompletionLedgers)
+            .unwrap_or(0);
         env.storage()
             .instance()
             .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
@@ -5849,7 +5871,7 @@ impl HamplardContract {
                 Symbol::new(&env, "min_completion_ledgers_updated"),
                 admin.clone(),
             ),
-            (admin, ledgers),
+            (admin, old_ledgers, ledgers),
         );
     }
 
@@ -5865,6 +5887,11 @@ impl HamplardContract {
     pub fn update_refund_window(env: Env, admin: Address, window: u32) {
         admin.require_auth();
         Self::require_admin(&env, &admin, "update_refund_window");
+        let old_window: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RefundWindow)
+            .unwrap_or(1000);
         env.storage()
             .instance()
             .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
@@ -5874,7 +5901,7 @@ impl HamplardContract {
 
         env.events().publish(
             (Symbol::new(&env, "refund_window_updated"), admin.clone()),
-            (admin, window),
+            (admin, old_window, window),
         );
     }
 
@@ -7782,6 +7809,11 @@ impl HamplardContract {
             soroban_sdk::panic_with_error!(&env, Error::InvalidFeeConfig);
         }
 
+        let old_fee_bps: Option<u32> = env
+            .storage()
+            .instance()
+            .get::<DataKey, FeeConfig>(&DataKey::FeeConfig(token.clone()))
+            .map(|c| c.fee_bps);
         let config = FeeConfig { fee_bps };
         env.storage()
             .instance()
@@ -7789,7 +7821,7 @@ impl HamplardContract {
 
         env.events().publish(
             (Symbol::new(&env, "fee_config_updated"), admin.clone()),
-            (token, fee_bps),
+            (token, old_fee_bps, fee_bps),
         );
     }
 
