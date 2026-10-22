@@ -83,6 +83,8 @@ When a student enrolls, the contract charges the course price and splits it in a
 
 The instructor share stays in the contract until each recipient calls `withdraw_earnings()`, which is what lets refunds debit the exact balances that were credited. The contract records the enrollment so no student can enroll twice.
 
+Enrollment is **price-protected**: `enroll()`, `batch_enroll()` and `re_enroll()` take a `max_price` argument, and the call reverts if the course's current price is higher. A student therefore can never be charged more than the price they saw when they signed, even if an instructor changes the price between the quote and execution.
+
 **3. On-Chain Certificates**
 After a student completes a course (verified off-chain by the backend), the admin issues an on-chain certificate. Each certificate is a permanent, verifiable record tied to the student's Stellar address and the course. Anyone can verify a certificate by querying `verify_certificate(certificate_id)` — no trusted middleman needed. Certificates can be revoked by the admin if issued in error, subject to a challenge window.
 
@@ -709,6 +711,7 @@ stellar contract invoke \
 - **Instructor freezes**: `freeze_instructor` blocks an instructor and automatically pauses all of their Active courses; `unfreeze_instructor` reverses it. Frozen instructors cannot operate while the platform keeps student funds safe.
 - **Student blocklist**: `block_student` bans an address from enrolling in any course; `unblock_student` lifts the ban.
 - **No double enrollment**: The contract checks for an existing enrollment record before processing payment. A student cannot be charged twice for the same course.
+- **Price protection**: `enroll()`, `batch_enroll()` and `re_enroll()` require a `max_price` and revert if the course's current price exceeds it, so a price change between a student's quote and execution cannot charge them more than they approved.
 - **Atomic payment split**: Both the platform and instructor transfers happen in the same transaction. There is no intermediate escrow that could be exploited.
 - **Certificate immutability**: Revoked certificates are flagged — not deleted. This preserves the audit trail and prevents a revocation from being hidden. Revocation is permanent only after the challenge period elapses.
 - **Fee validation**: Platform fee percentage is validated to be ≤ 100 at both `init` and `register_course` time.
