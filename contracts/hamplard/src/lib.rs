@@ -8412,6 +8412,7 @@ impl HamplardContract {
             .instance()
             .get(&DataKey::RiskConfigEnabled)
             .unwrap_or(false);
+        let config: Option<RiskFeeConfig> = env.storage().instance().get(&DataKey::RiskFeeConfig);
 
         let (score, surcharge_bps) = risk_surcharge(
             enabled,
