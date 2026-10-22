@@ -2470,6 +2470,22 @@ impl HamplardContract {
             }
         }
 
+        // Check platform-wide enrollment cap (mirrors validate_enrollment)
+        if let Some(platform_cap) = env
+            .storage()
+            .instance()
+            .get::<DataKey, u32>(&DataKey::PlatformEnrollmentCap)
+        {
+            let total_active: u32 = env
+                .storage()
+                .instance()
+                .get(&DataKey::TotalActiveEnrollments)
+                .unwrap_or(0);
+            if total_active >= platform_cap {
+                panic!("platform has reached maximum total enrollment capacity");
+            }
+        }
+
         if let Some(expiry) = course.expires_at_ledger {
             if env.ledger().sequence() >= expiry {
                 Self::emit_enrollment_failed(env, student, course_id, "COURSE_EXPIRED");
