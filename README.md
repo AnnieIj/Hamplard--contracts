@@ -333,6 +333,7 @@ Initialises the contract once. The admin must sign.
 |---|---|
 | `get_course(course_id)` | Full `Course` struct |
 | `get_enrollment(caller, student, course_id)` | `Enrollment` (student, course instructor, or admin only) |
+| `quote_enrollment(course_id, student)` | `(price, platform_fee, instructor_share)` using the current enrollment fee calculation |
 | `get_certificate(caller, certificate_id)` | `Certificate` (student, course instructor, or admin only) |
 | `is_enrolled(student, course_id)` | `bool` |
 | `has_completed(student, course_id)` | `Option<bool>` |
@@ -383,6 +384,8 @@ The platform fee percentage can be:
 - **Global default** (set at `init`, updatable by admin)
 - **Per-token configuration** via `set_fee_config(token, fee_bps)`
 - **Per-course override** captured at registration as a floor on the live fee
+
+`quote_enrollment(course_id, student)` returns the current price and exact split that enrollment will use, including the course's fee override and applicable risk settings.
 
 ---
 
