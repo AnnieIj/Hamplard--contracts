@@ -605,8 +605,8 @@ stellar keys fund my-account --network testnet
 ## Setup & Installation
 
 ```bash
-git clone https://github.com/your-org/hamplard-contract.git
-cd hamplard-contract
+git clone https://github.com/Hamplard-Hub/Hamplard--contracts.git
+cd Hamplard--contracts
 cargo check
 ```
 
