@@ -1849,16 +1849,45 @@ fn test_enroll_insufficient_funds_rollback() {
     );
     let course_id = String::from_str(&env, "COURSE-ROLLBACK");
 
-    // Student has enough for platform fee (100_000_000) but not the full course price
+    // Student has enough for platform fee (100_000_000) but not the full course price.
+    // A failed payment must not panic: enrollment fails gracefully and emits a
+    // scoped `enrollment_failed` event with reason INSUFFICIENT_BALANCE.
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &150_000_000);
 
+<<<<<<< HEAD
     // The token transfer fails, so enroll() emits an EnrollmentFailed event
     // and returns without recording an enrollment or moving any funds.
     client.enroll(&student, &course_id);
 
     assert!(!client.is_enrolled(&student, &course_id));
+=======
+    client.enroll(&student, &course_id);
+
+    // The failure trace records the scoped reason for off-chain consumers.
+    let failed: EnrollmentFailed = last_event_val(&env, &contract_id, "enrollment_failed")
+        .try_into_val(&env)
+        .unwrap();
+    assert_eq!(failed.course_id, course_id);
+    assert_eq!(failed.student, student);
+    assert_eq!(
+        failed.reason_code,
+        String::from_str(&env, "INSUFFICIENT_BALANCE")
+    );
+
+    // No enrollment state was mutated (rollback proof)
+    assert!(!client.is_enrolled(&student, &course_id));
+    assert!(client
+        .get_enrollment(&student, &student, &course_id)
+        .is_none());
+    let course = client.get_course(&course_id).unwrap();
+    assert_eq!(course.total_enrollments, 0);
+    assert_eq!(course.active_enrollments, 0);
+
+    // Verify treasury didn't receive any tokens and no balances moved
+>>>>>>> pr/552
     assert_eq!(token_client.balance(&treasury), 0);
     assert_eq!(token_client.balance(&student), 150_000_000);
+    assert_eq!(token_client.balance(&contract_id), 0);
 }
 
 #[test]

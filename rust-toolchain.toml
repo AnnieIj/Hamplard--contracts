@@ -6,3 +6,7 @@
 channel    = "1.96.0"
 targets    = ["wasm32v1-none"]
 components = ["rustc", "cargo", "rustfmt", "clippy", "rust-src"]
+
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
