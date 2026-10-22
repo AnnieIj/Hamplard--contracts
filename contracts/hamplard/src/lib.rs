@@ -225,8 +225,129 @@
 
 #![no_std]
 
-#[cfg(test)]
-extern crate std;
+//! # Hamplard — On-Chain Course Enrollment, Payments & Certificates on Stellar Soroban
+//!
+//! Hamplard is an online learning platform for practical vocational skills. This contract handles
+//! the trustless financial and credential layer: course enrollment payments, automatic instructor
+//! revenue splits, on-chain certificates of completion, and admin-initiated refunds.
+//!
+//! ## Overview
+//!
+//! The contract supports four core responsibilities:
+//!
+//! **1. Course Registry**
+//! Instructors register courses on-chain with a price and fee structure. Each course starts as
+//! `Pending` — an admin must approve it before students can enroll. This gives the platform
+//! moderation control without being able to move anyone's funds.
+//!
+//! **2. Enrollment Payments**
+//! When a student enrolls, the contract automatically splits the payment in a single transaction:
+//! - Platform fee → treasury address
+//! - Instructor share → instructor address directly
+//!
+//! No escrow needed — the payment splits and lands in both wallets immediately. The contract
+//! records the enrollment so no student can enroll twice.
+//!
+//! **3. On-Chain Certificates**
+//! After a student completes a course (verified off-chain by the backend), the admin issues
+//! an on-chain certificate. Each certificate is a permanent, verifiable record tied to the
+//! student's Stellar address and the course. Anyone can verify a certificate by querying
+//! `verify_certificate(certificate_id)` — no trusted middleman needed. Certificates can be
+//! revoked by the admin if issued in error.
+//!
+//! **4. Refunds**
+//! Both admins can jointly issue refunds by archiving a course and specifying which students
+//! to refund. Refunds return the full enrollment amount to students with incomplete enrollments.
+//! This provides dispute resolution and quality control mechanisms without requiring a time window.
+//!
+//! ## Refund Mechanisms
+//!
+//! ### Admin-Initiated Refunds (via `archive_course`)
+//!
+//! This is the only refund mechanism in Hamplard. Both admins must jointly sign the transaction.
+//!
+//! **How It Works:**
+//! - Admin calls `archive_course(admin1, admin2, course_id, students_to_refund)`
+//! - The course must be in `Paused` status (safety check to prevent accidental refunds)
+//! - For each student in the refund list:
+//!   - If enrollment exists and is **incomplete** (`completed == false`):
+//!     - Platform's fee share is refunded from the treasury
+//!     - Instructor's share is refunded from the instructor's account
+//!     - Full enrollment amount is returned to the student
+//!     - Enrollment record is deleted from the contract
+//!   - Completed enrollments are **not** refunded (certificate already issued)
+//! - Course is archived permanently
+//! - Active enrollments count must reach zero before archiving succeeds
+//!
+//! **Refund Window:**
+//! There is no time-based refund window. Refunds can be initiated at any point in the course lifecycle:
+//! - During the course (if students want to drop out)
+//! - After the course ends (if issues with content or instruction arise)
+//! - Long after enrollment (if disputes need resolution)
+//!
+//! The flexibility allows admins to handle real-world situations: disappearing instructors,
+//! poor course quality, student dissatisfaction, and other dispute scenarios.
+//!
+//! **Authorization & Safety:**
+//! - **Multi-signature requirement**: Both the primary admin and secondary admin must sign.
+//!   This prevents a single compromised or rogue admin from unilaterally draining instructor
+//!   funds through unauthorized refunds.
+//! - **Course state check**: The course must be `Paused` before archiving, ensuring the refund
+//!   action is intentional and coordinated, not accidental.
+//! - **Incomplete-only**: Only students who haven't completed the course are refunded. Completed
+//!   students keep their certificates and their money is treated as earned instructor revenue.
+//!
+//! **Example Scenario:**
+//! ```text
+//! Course: COURSE-BAKING-101 (price: 100 USDC, 20% platform fee)
+//! Enrollments: student_a (incomplete), student_b (incomplete), student_c (completed)
+//! Instructor disappears mid-course; students complain.
+//!
+//! Steps:
+//! 1. Admin calls: pause_course(COURSE-BAKING-101)
+//! 2. Admin calls: archive_course(admin1, admin2, COURSE-BAKING-101, [student_a, student_b])
+//!
+//! Results:
+//! - student_a receives 100 USDC (20 USDC from treasury, 80 USDC from instructor)
+//! - student_b receives 100 USDC (20 USDC from treasury, 80 USDC from instructor)
+//! - student_c keeps their certificate; no refund issued (already completed)
+//! - Course is now Archived
+//! ```
+//!
+//! ## Roles & Permissions
+//!
+//! | Role | Signature Required | Permissions |
+//! |------|---|---|
+//! | **Admin (Primary)** | Yes (on eligible operations) | Approve/archive courses, mark completions, issue/revoke certificates, update fees; must co-sign with secondary admin for admin transfers, treasury updates, and refunds |
+//! | **Secondary Admin** | Yes (on eligible operations) | Co-signer for admin transfers, treasury updates, and refunds; must approve/sign alongside primary admin |
+//! | **Instructor** | Yes | Register courses, pause/unpause their own courses |
+//! | **Student** | Yes | Enroll in active courses |
+//! | **Treasury** | No | Receives platform fee share (passive recipient only) |
+//!
+//! ## Data & State
+//!
+//! The contract stores:
+//! - **Course records**: ID, instructor, price, fee structure, enrollment counts, status
+//! - **Enrollment records**: Student address, course ID, amount paid, completion status, certificate issuance flag
+//! - **Certificate records**: Certificate ID, student, course, title, instructor, issuance/revocation metadata
+//! - **Admin addresses**: Primary and secondary admin for authorization checks
+//! - **Platform configuration**: Treasury address, default fee percentage, whitelisted token addresses
+//!
+//! Everything else (course descriptions, lessons, assignments, student progress, user profiles)
+//! lives off-chain in the backend database.
+//!
+//! ## Events
+//!
+//! The contract emits events for off-chain indexing:
+//! - `course_registered`: Instructor registers a course
+//! - `course_approved`: Admin approves a course for enrollment
+//! - `course_paused` / `course_unpaused`: Course lifecycle changes
+//! - `course_archived`: Course is archived (with or without refunds)
+//! - `student_enrolled`: Student enrolls and pays
+//! - `course_completed`: Admin marks a course as completed for a student
+//! - `certificate_issued`: Certificate is issued to a student
+//! - `certificate_revoked`: Certificate is revoked
+//! - `admin_transferred`: Admin role is transferred to a new address
 
 use soroban_sdk::{
 <<<<<<< HEAD
