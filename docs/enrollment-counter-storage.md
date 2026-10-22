@@ -9,6 +9,7 @@ canonical counter before accepting an enrollment.
 showed that leaving it in instance storage would still rewrite the instance
 on every enrollment, even after moving the active-enrollment count.
 
+<<<<<<< HEAD
 ## Platform enrollment cap
 
 `set_platform_enrollment_cap()` rejects a new cap that is below the
@@ -18,6 +19,14 @@ call panics instead of accepting an impossible cap. A cap equal to the
 current total is allowed and effectively blocks further enrollments until
 capacity is freed by completion or refund. To lower the cap below the
 current total, admins must first reduce the number of active enrollments.
+=======
+`InstructorCourseCount` and `InstructorPendingCourseCount` likewise move from
+instance storage to per-instructor persistent entries. Previously each new
+instructor added instance entries, so instance size grew with the number of
+instructors and every call became more expensive. These counters now use the
+same persistent read/write helpers and TTL policy as the other counters, so
+instance size no longer grows with the number of instructors.
+>>>>>>> pr/608
 
 ## Existing deployments
 
@@ -27,6 +36,14 @@ forward into persistent storage. The legacy instance value is retained but
 becomes noncanonical, avoiding a migration write to the instance during
 enrollment. An upgrade must restore archived persistent counter entries before
 using the contract; it must not discard them and fall back to stale legacy data.
+
+This applies to the per-instructor counters as well: on first access after an
+upgrade, `InstructorCourseCount` and `InstructorPendingCourseCount` fall back to
+their legacy instance values (or their original default of zero) and write the
+result forward into persistent storage. The legacy instance entries are left in
+place but are noncanonical. Operators must ensure archived persistent
+per-instructor counter entries are restored before use rather than discarded in
+favor of stale legacy instance data.
 
 There is no reset of active counts or reuse of existing enrollment references.
 Reference increments now also reject `uint32` overflow explicitly. No public

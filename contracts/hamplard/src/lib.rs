@@ -1000,6 +1000,14 @@ pub enum DataKey {
     InstructorCourseCount(Address),
     /// Number of currently pending courses for an instructor
     InstructorPendingCourseCount(Address),
+    /// Legacy instance-storage key for the per-instructor course count.
+    /// Retained only so the migration helper can read and clear the old
+    /// instance entry; new writes go to `InstructorCourseCountPersistent`.
+    InstructorCourseCountLegacy(Address),
+    /// Legacy instance-storage key for the per-instructor pending count.
+    /// Retained only so the migration helper can read and clear the old
+    /// instance entry; new writes go to `InstructorPendingCourseCountPersistent`.
+    InstructorPendingCourseCountLegacy(Address),
     /// Ordered list of course IDs registered by a specific instructor
     /// (append-only — course status changes never remove an entry).
     InstructorCourseList(Address),
@@ -1095,6 +1103,12 @@ pub enum DataKey {
     ApprovedTokenList,
     /// Lifetime enrollment count per student (new-customer risk flag).
     StudentEnrollmentCount(Address),
+    /// Persistent per-instructor course count (migrated out of instance
+    /// storage so instance size no longer grows with the instructor count).
+    InstructorCourseCountPersistent(Address),
+    /// Persistent per-instructor pending course count (migrated out of
+    /// instance storage so instance size no longer grows with the instructor count).
+    InstructorPendingCourseCountPersistent(Address),
 }
 
 /// Overflow keys split out to avoid the #[contracttype] variant-count limit.
@@ -1617,19 +1631,16 @@ impl HamplardContract {
             .get(&DataKey::MaxCoursesPerInstructor)
             .unwrap_or(50);
 
-        let course_count_key = DataKey::InstructorCourseCount(instructor.clone());
-        let current_count: u32 = env.storage().instance().get(&course_count_key).unwrap_or(0);
+        let course_count_key = DataKey::InstructorCourseCountPersistent(instructor.clone());
+        let current_count: u32 = Self::read_instructor_course_count(&env, &instructor);
 
         if current_count >= max_courses {
             soroban_sdk::panic_with_error!(&env, Error::InstructorCourseLimitReached);
         }
 
-        let pending_count_key = DataKey::InstructorPendingCourseCount(instructor.clone());
-        let current_pending_count: u32 = env
-            .storage()
-            .instance()
-            .get(&pending_count_key)
-            .unwrap_or(0);
+        let pending_count_key =
+            DataKey::InstructorPendingCourseCountPersistent(instructor.clone());
+        let current_pending_count = Self::read_instructor_pending_course_count(&env, &instructor);
 
         if current_pending_count >= max_courses {
             soroban_sdk::panic_with_error!(&env, Error::InstructorCourseLimitReached);
@@ -1710,13 +1721,22 @@ impl HamplardContract {
         catalog.push_back(course_id.clone());
         Self::persist(&env, &DataKey::CourseList, &catalog);
 
-        env.storage().instance().set(
-            &DataKey::InstructorCourseCount(instructor.clone()),
-            &(current_count + 1),
+        env.storage()
+            .persistent()
+            .set(&course_count_key, &(current_count + 1));
+        env.storage().persistent().extend_ttl(
+            &course_count_key,
+            Self::PERSISTENT_TTL_THRESHOLD,
+            Self::PERSISTENT_TTL_EXTEND_TO,
         );
         env.storage()
-            .instance()
+            .persistent()
             .set(&pending_count_key, &(current_pending_count + 1));
+        env.storage().persistent().extend_ttl(
+            &pending_count_key,
+            Self::PERSISTENT_TTL_THRESHOLD,
+            Self::PERSISTENT_TTL_EXTEND_TO,
+        );
 
         // Append to the per-instructor course list
         let instructor_list_key = DataKey::InstructorCourseList(instructor.clone());
@@ -1851,14 +1871,20 @@ impl HamplardContract {
         course.last_updated_ledger = env.ledger().sequence();
         Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
-        let pending_key = DataKey::InstructorPendingCourseCount(course.instructor.clone());
-        let pending_count: u32 = env.storage().instance().get(&pending_key).unwrap_or(0);
+        let pending_key =
+            DataKey::InstructorPendingCourseCountPersistent(course.instructor.clone());
+        let pending_count = Self::read_instructor_pending_course_count(&env, &course.instructor);
         let new_pending_count = pending_count
             .checked_sub(1)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::CounterUnderflow));
         env.storage()
-            .instance()
+            .persistent()
             .set(&pending_key, &new_pending_count);
+        env.storage().persistent().extend_ttl(
+            &pending_key,
+            Self::PERSISTENT_TTL_THRESHOLD,
+            Self::PERSISTENT_TTL_EXTEND_TO,
+        );
 
         env.events().publish(
             (Symbol::new(&env, "course_approved"), course_id.clone()),
@@ -2102,15 +2128,16 @@ impl HamplardContract {
             .get(&DataKey::MaxCoursesPerInstructor)
             .unwrap_or(50);
 
-        let new_count_key = DataKey::InstructorCourseCount(new_instructor.clone());
-        let new_count: u32 = env.storage().instance().get(&new_count_key).unwrap_or(0);
+        let new_count_key = DataKey::InstructorCourseCountPersistent(new_instructor.clone());
+        let new_count = Self::read_instructor_course_count(&env, &new_instructor);
         if new_count >= max_courses {
             soroban_sdk::panic_with_error!(&env, Error::InstructorCourseLimitReached);
         }
 
         if course.status == CourseStatus::Pending {
-            let new_pending_key = DataKey::InstructorPendingCourseCount(new_instructor.clone());
-            let new_pending: u32 = env.storage().instance().get(&new_pending_key).unwrap_or(0);
+            let new_pending_key =
+                DataKey::InstructorPendingCourseCountPersistent(new_instructor.clone());
+            let new_pending = Self::read_instructor_pending_course_count(&env, &new_instructor);
             if new_pending >= max_courses {
                 soroban_sdk::panic_with_error!(&env, Error::InstructorCourseLimitReached);
             }
@@ -2130,34 +2157,56 @@ impl HamplardContract {
             &new_instructor,
         );
 
-        let old_count_key = DataKey::InstructorCourseCount(previous_instructor.clone());
-        let old_count: u32 = env.storage().instance().get(&old_count_key).unwrap_or(0);
+        let old_count_key = DataKey::InstructorCourseCountPersistent(previous_instructor.clone());
+        let old_count = Self::read_instructor_course_count(&env, &previous_instructor);
         let decremented_old = old_count
             .checked_sub(1)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::CounterUnderflow));
         env.storage()
-            .instance()
+            .persistent()
             .set(&old_count_key, &decremented_old);
+        env.storage().persistent().extend_ttl(
+            &old_count_key,
+            Self::PERSISTENT_TTL_THRESHOLD,
+            Self::PERSISTENT_TTL_EXTEND_TO,
+        );
         env.storage()
-            .instance()
+            .persistent()
             .set(&new_count_key, &(new_count + 1));
+        env.storage().persistent().extend_ttl(
+            &new_count_key,
+            Self::PERSISTENT_TTL_THRESHOLD,
+            Self::PERSISTENT_TTL_EXTEND_TO,
+        );
 
         if course.status == CourseStatus::Pending {
             let old_pending_key =
-                DataKey::InstructorPendingCourseCount(previous_instructor.clone());
-            let old_pending: u32 = env.storage().instance().get(&old_pending_key).unwrap_or(0);
+                DataKey::InstructorPendingCourseCountPersistent(previous_instructor.clone());
+            let old_pending =
+                Self::read_instructor_pending_course_count(&env, &previous_instructor);
             let decremented_pending = old_pending
                 .checked_sub(1)
                 .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::CounterUnderflow));
             env.storage()
-                .instance()
+                .persistent()
                 .set(&old_pending_key, &decremented_pending);
+            env.storage().persistent().extend_ttl(
+                &old_pending_key,
+                Self::PERSISTENT_TTL_THRESHOLD,
+                Self::PERSISTENT_TTL_EXTEND_TO,
+            );
 
-            let new_pending_key = DataKey::InstructorPendingCourseCount(new_instructor.clone());
-            let new_pending: u32 = env.storage().instance().get(&new_pending_key).unwrap_or(0);
+            let new_pending_key =
+                DataKey::InstructorPendingCourseCountPersistent(new_instructor.clone());
+            let new_pending = Self::read_instructor_pending_course_count(&env, &new_instructor);
             env.storage()
-                .instance()
+                .persistent()
                 .set(&new_pending_key, &(new_pending + 1));
+            env.storage().persistent().extend_ttl(
+                &new_pending_key,
+                Self::PERSISTENT_TTL_THRESHOLD,
+                Self::PERSISTENT_TTL_EXTEND_TO,
+            );
         }
 
         // InstructorCourseList is append-only for the previous instructor
@@ -8001,6 +8050,92 @@ impl HamplardContract {
             .unwrap_or_else(|| panic!("overflow computing instructor total earnings"));
         Self::persist(&env, &total_key, &new_total);
 >>>>>>> pr/563
+    }
+
+    /// Read an instructor's total course count.
+    ///
+    /// Reads the persistent counter, falling back to the legacy instance
+    /// entry for instructors whose counters were written before the
+    /// storage-layout migration. See `migrate_instructor_counters`.
+    fn read_instructor_course_count(env: &Env, instructor: &Address) -> u32 {
+        let key = DataKey::InstructorCourseCountPersistent(instructor.clone());
+        if let Some(count) = env.storage().persistent().get::<DataKey, u32>(&key) {
+            return count;
+        }
+        env.storage()
+            .instance()
+            .get::<DataKey, u32>(&DataKey::InstructorCourseCountLegacy(instructor.clone()))
+            .unwrap_or(0)
+    }
+
+    /// Read an instructor's pending course count.
+    ///
+    /// Reads the persistent counter, falling back to the legacy instance
+    /// entry for instructors whose counters were written before the
+    /// storage-layout migration. See `migrate_instructor_counters`.
+    fn read_instructor_pending_course_count(env: &Env, instructor: &Address) -> u32 {
+        let key = DataKey::InstructorPendingCourseCountPersistent(instructor.clone());
+        if let Some(count) = env.storage().persistent().get::<DataKey, u32>(&key) {
+            return count;
+        }
+        env.storage()
+            .instance()
+            .get::<DataKey, u32>(&DataKey::InstructorPendingCourseCountLegacy(instructor.clone()))
+            .unwrap_or(0)
+    }
+
+    /// Migration helper: move a batch of instructors' course counters from
+    /// instance storage into persistent storage.
+    ///
+    /// Must be called by the admin after upgrading to the version that
+    /// introduced `InstructorCourseCountPersistent` /
+    /// `InstructorPendingCourseCountPersistent`. For each instructor in
+    /// `instructors`, the legacy instance entries are copied to persistent
+    /// storage (if not already present) and then removed from instance
+    /// storage, so the instance entry stops growing with the instructor
+    /// count. Callers should pass every address from `get_instructor_registry`
+    /// (in batches) until the migration is complete.
+    ///
+    /// Idempotent: re-running over an already-migrated instructor is a no-op.
+    pub fn migrate_instructor_counters(env: Env, admin: Address, instructors: Vec<Address>) {
+        admin.require_auth();
+        Self::require_admin(&env, &admin, "migrate_instructor_counters");
+
+        for instructor in instructors.iter() {
+            let course_key = DataKey::InstructorCourseCountPersistent(instructor.clone());
+            if !env.storage().persistent().has(&course_key) {
+                let legacy_key = DataKey::InstructorCourseCountLegacy(instructor.clone());
+                if let Some(count) = env.storage().instance().get::<DataKey, u32>(&legacy_key) {
+                    env.storage().persistent().set(&course_key, &count);
+                    env.storage().persistent().extend_ttl(
+                        &course_key,
+                        Self::PERSISTENT_TTL_THRESHOLD,
+                        Self::PERSISTENT_TTL_EXTEND_TO,
+                    );
+                }
+            }
+            env.storage()
+                .instance()
+                .remove(&DataKey::InstructorCourseCountLegacy(instructor.clone()));
+
+            let pending_key =
+                DataKey::InstructorPendingCourseCountPersistent(instructor.clone());
+            if !env.storage().persistent().has(&pending_key) {
+                let legacy_key =
+                    DataKey::InstructorPendingCourseCountLegacy(instructor.clone());
+                if let Some(count) = env.storage().instance().get::<DataKey, u32>(&legacy_key) {
+                    env.storage().persistent().set(&pending_key, &count);
+                    env.storage().persistent().extend_ttl(
+                        &pending_key,
+                        Self::PERSISTENT_TTL_THRESHOLD,
+                        Self::PERSISTENT_TTL_EXTEND_TO,
+                    );
+                }
+            }
+            env.storage()
+                .instance()
+                .remove(&DataKey::InstructorPendingCourseCountLegacy(instructor.clone()));
+        }
     }
 
     fn debit_instructor_earnings(env: &Env, instructor: &Address, token: &Address, amount: i128) {
