@@ -422,6 +422,7 @@ use soroban_sdk::{
     contract, contractimpl, contracttype, token, Address, Bytes, BytesN, Env, Map, String, Symbol, Vec,
 >>>>>>> pr/599
 };
+use soroban_sdk::contractevent;
 
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -629,6 +630,17 @@ pub struct RiskFeeApplied {
     pub student: Address,
 }
 
+#[contractevent]
+#[derive(Clone, Debug, PartialEq)]
+pub struct RiskFeeAppliedEvent {
+    #[topic]
+    pub payment_amount: i128,
+    pub base_fee_bps: u32,
+    pub risk_surcharge_bps: u32,
+    pub effective_fee_bps: u32,
+    pub platform_fee: i128,
+}
+
 /// Emitted when an enrollment is rejected due to course status.
 /// Includes course_id, student address, course status, and ledger sequence
 /// so rejection reasons are auditable off-chain.
@@ -650,6 +662,18 @@ pub struct EnrollmentFailed {
     pub student: Address,
     pub reason_code: String,
     pub ledger_sequence: u32,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, PartialEq)]
+pub struct InitializedEvent {
+    #[topic]
+    pub admin: Address,
+    pub secondary_admin: Address,
+    pub treasury: Address,
+    pub default_fee_pct: u32,
+    pub max_courses_per_instructor: u32,
+    pub refund_window_ledgers: u32,
 }
 
 // ============================================================
@@ -1191,6 +1215,13 @@ pub struct PendingUpgrade {
     pub effective_ledger: u32,
 }
 
+#[contractevent]
+#[derive(Clone, Debug, PartialEq)]
+pub struct CourseRegisteredEvent {
+    #[topic]
+    pub course_id: String,
+}
+
 // ============================================================
 // CONTRACT
 // ============================================================
@@ -1431,17 +1462,15 @@ impl HamplardContract {
             .instance()
             .set(&DataKey::InitLedger, &env.ledger().sequence());
 
-        env.events().publish(
-            (Symbol::new(&env, "initialized"), admin.clone()),
-            (
-                admin,
-                secondary_admin,
-                treasury,
-                default_fee_pct,
-                max_courses_per_instructor,
-                refund_window_ledgers,
-            ),
-        );
+        InitializedEvent {
+            admin: admin.clone(),
+            secondary_admin,
+            treasury,
+            default_fee_pct,
+            max_courses_per_instructor,
+            refund_window_ledgers,
+        }
+        .publish(&env);
     }
 
     /// Admin sets (or rotates) the moderator address.

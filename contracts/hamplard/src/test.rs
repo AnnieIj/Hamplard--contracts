@@ -14576,6 +14576,34 @@ fn test_withdraw_tokens_caps_withdrawal_to_surplus_above_liabilities() {
         &token_id,
         &admin,
         &instructor,
+        "COURSE-REF-MISMATCH",
+        100_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-REF-MISMATCH");
+
+    client.enroll(&student, &course_id);
+    client.mark_completed(
+        &admin,
+        &student,
+        &course_id,
+        &Some(evidence_hash(&env, "evidence-1")),
+    );
+
+    // Simulate an inconsistency: overwrite course.instructor in persistent
+    // storage with a different address while leaving CourseInstructorRef
+    // pointing to the original instructor. This is the tampered-state
+    // scenario the check is designed to catch.
+    let impostor = Address::generate(&env);
+    env.as_contract(&contract_id, || {
+        let key = DataKey::Course(course_id.clone());
+        let mut course: Course = env.storage().persistent().get(&key).unwrap();
+        course.instructor = impostor.clone();
+        env.storage().persistent().set(&key, &course);
+    });
+
+    // re_enroll() must now panic with "course instructor reference mismatch"
+    // exactly as enroll() / validate_enrollment() would.
+    client.re_enroll(&student, &course_id);
         "COURSE-SURPLUS-TEST",
         price,
     );
