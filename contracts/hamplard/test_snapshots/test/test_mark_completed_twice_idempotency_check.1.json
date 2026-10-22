@@ -261,7 +261,7 @@
                   "string": "COURSE-IDEMPOTENT"
                 },
                 {
-                  "string": "same_evidence"
+                  "bytes": "73616d655f65766964656e636500000000000000000000000000000000000000"
                 }
               ]
             }
@@ -850,7 +850,7 @@
                         "symbol": "evidence_hash"
                       },
                       "val": {
-                        "string": "same_evidence"
+                        "bytes": "73616d655f65766964656e636500000000000000000000000000000000000000"
                       }
                     },
                     {

@@ -324,7 +324,7 @@
                   "string": "COURSE-BULK-TARGET"
                 },
                 {
-                  "string": "completion-evidence"
+                  "bytes": "636f6d706c6574696f6e2d65766964656e636500000000000000000000000000"
                 }
               ]
             }
@@ -484,7 +484,7 @@
                   "string": "COURSE-BULK-TARGET"
                 },
                 {
-                  "string": "completion-evidence"
+                  "bytes": "636f6d706c6574696f6e2d65766964656e636500000000000000000000000000"
                 }
               ]
             }
@@ -644,7 +644,7 @@
                   "string": "COURSE-BULK-UNTOUCHED"
                 },
                 {
-                  "string": "completion-evidence"
+                  "bytes": "636f6d706c6574696f6e2d65766964656e636500000000000000000000000000"
                 }
               ]
             }
@@ -2260,7 +2260,7 @@
                         "symbol": "evidence_hash"
                       },
                       "val": {
-                        "string": "completion-evidence"
+                        "bytes": "636f6d706c6574696f6e2d65766964656e636500000000000000000000000000"
                       }
                     },
                     {
@@ -2433,7 +2433,7 @@
                         "symbol": "evidence_hash"
                       },
                       "val": {
-                        "string": "completion-evidence"
+                        "bytes": "636f6d706c6574696f6e2d65766964656e636500000000000000000000000000"
                       }
                     },
                     {
@@ -2606,7 +2606,7 @@
                         "symbol": "evidence_hash"
                       },
                       "val": {
-                        "string": "completion-evidence"
+                        "bytes": "636f6d706c6574696f6e2d65766964656e636500000000000000000000000000"
                       }
                     },
                     {
