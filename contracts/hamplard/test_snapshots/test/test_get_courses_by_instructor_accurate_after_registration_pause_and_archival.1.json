@@ -485,6 +485,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "co_instructors"
+                      },
+                      "val": {
+                        "vec": []
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "content_hash"
                       },
                       "val": {
@@ -641,7 +649,7 @@
             },
             "ext": "v0"
           },
-          4096
+          6300001
         ]
       ],
       [
@@ -721,6 +729,14 @@
                       },
                       "val": {
                         "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "co_instructors"
+                      },
+                      "val": {
+                        "vec": []
                       }
                     },
                     {
@@ -961,6 +977,14 @@
                       },
                       "val": {
                         "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "co_instructors"
+                      },
+                      "val": {
+                        "vec": []
                       }
                     },
                     {

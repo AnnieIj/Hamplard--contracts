@@ -500,6 +500,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "co_instructors"
+                      },
+                      "val": {
+                        "vec": []
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "content_hash"
                       },
                       "val": {
@@ -656,7 +664,7 @@
             },
             "ext": "v0"
           },
-          4095
+          6300000
         ]
       ],
       [

@@ -375,6 +375,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "co_instructors"
+                      },
+                      "val": {
+                        "vec": []
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "content_hash"
                       },
                       "val": {
@@ -1414,5 +1422,62 @@
       ]
     ]
   },
-  "events": []
+  "events": [
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "EnrollmentFailed"
+              },
+              {
+                "string": "COURSE-GRACE-BEFORE"
+              }
+            ],
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "course_id"
+                  },
+                  "val": {
+                    "string": "COURSE-GRACE-BEFORE"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "ledger_sequence"
+                  },
+                  "val": {
+                    "u32": 1
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "reason"
+                  },
+                  "val": {
+                    "u32": 11
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "student"
+                  },
+                  "val": {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATYON"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": true
+    }
+  ]
 }

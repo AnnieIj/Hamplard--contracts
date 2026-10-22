@@ -508,6 +508,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "co_instructors"
+                      },
+                      "val": {
+                        "vec": []
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "content_hash"
                       },
                       "val": {
@@ -647,7 +655,7 @@
                         "symbol": "total_enrollments"
                       },
                       "val": {
-                        "u32": 1
+                        "u32": 0
                       }
                     },
                     {
@@ -664,7 +672,7 @@
             },
             "ext": "v0"
           },
-          4096
+          6300001
         ]
       ],
       [
