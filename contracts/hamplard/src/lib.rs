@@ -12,9 +12,30 @@
 //! | Student           | Any caller                 | Enroll, request refunds, challenge revocations, escalate disputes, waitlist  |
 //! | Treasury          | `DataKey::Treasury`        | Passive recipient of the platform fee share; cannot initiate any action      |
 //!
+<<<<<<< HEAD
 //! ## Privileged Operations — Admin (single signature)
 //! Each entrypoint below calls `require_auth()` on, and checks, the stored Admin
 //! (unless an explicit alternative signer is noted). Admin-expiry checks apply.
+=======
+//! ## Privileged Operations (single admin)
+//! - `approve_course` — moves a course from Pending to Active
+//! - `transfer_course` — co-approves an instructor-initiated course ownership transfer
+//! - `mark_completed` — marks a student enrollment as completed (blocked students cannot proceed)
+//! - `issue_certificate` — mints an on-chain certificate of completion (blocked students cannot proceed)
+//! - `revoke_certificate` — flags a certificate as revoked (remains on-chain for audit)
+//! - `process_refund` — approves a pending refund; if the enrollment already has a
+//!   certificate issued, the certificate is revoked with reason `REFUNDED` and a
+//!   `certificate_revoked` event is emitted, so no refunded enrollment can leave
+//!   behind a certificate that verifies as valid
+//! - `bulk_revoke_course_certificates` — flags every certificate of a course as revoked in one transaction
+//! - `pause_platform` / `unpause_platform` — halts or restores all enrollments
+//! - `add_approved_token` / `remove_approved_token` — controls which token contracts are accepted
+//! - `update_default_fee` / `update_max_courses_limit` — updates global parameters
+//! - `block_student` / `unblock_student` — bans or unbans a student from the platform
+//! - `get_platform_fee` — retrieves platform fee configuration (admin only)
+//! - `get_treasury` / `get_pending_treasury` — public views of the effective treasury and any scheduled update
+//! - `update_content_hash` — updates the content commitment hash for a course (admin or instructor)
+>>>>>>> pr/562
 //!
 //! - `init` — one-time bootstrap by the deployer/admin; writes the admin pair,
 //!   treasury, fee, refund window and revocation challenge period
@@ -3500,11 +3521,14 @@ impl HamplardContract {
                 );
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                 panic!("token transfer amount mismatch");
 =======
 >>>>>>> pr/557
 =======
 >>>>>>> pr/559
+=======
+>>>>>>> pr/562
                 return;
             }
 
@@ -4626,6 +4650,40 @@ impl HamplardContract {
                 effective_ledger,
             ),
         );
+    }
+
+    /// Get the effective platform treasury, i.e. where fees go right now.
+    ///
+    /// A scheduled `update_treasury` takes effect once the ledger reaches its
+    /// `effective_ledger`, so this returns the pending address from that
+    /// ledger onward. Read-only: unlike `enroll`, it never writes the
+    /// promotion back to storage.
+    pub fn get_treasury(env: Env) -> Address {
+        if let Some(pending) = env
+            .storage()
+            .instance()
+            .get::<DataKey, TreasuryUpdate>(&DataKey::PendingTreasury)
+        {
+            if env.ledger().sequence() >= pending.effective_ledger {
+                return pending.address;
+            }
+        }
+        env.storage()
+            .instance()
+            .get(&DataKey::Treasury)
+            .unwrap_or_else(|| panic!("treasury not set"))
+    }
+
+    /// Get the scheduled treasury update that has not yet taken effect.
+    ///
+    /// Returns `None` when no update is scheduled, or once its
+    /// `effective_ledger` has been reached (it is then the effective
+    /// treasury; see `get_treasury`).
+    pub fn get_pending_treasury(env: Env) -> Option<TreasuryUpdate> {
+        env.storage()
+            .instance()
+            .get::<DataKey, TreasuryUpdate>(&DataKey::PendingTreasury)
+            .filter(|p| env.ledger().sequence() < p.effective_ledger)
     }
 
     /// Update the default platform fee percentage.

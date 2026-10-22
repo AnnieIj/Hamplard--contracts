@@ -1970,7 +1970,6 @@ fn test_enroll_insufficient_funds_rollback() {
 
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
     // The token transfer fails, so enroll() emits an EnrollmentFailed event
     // and returns without recording an enrollment or moving any funds.
     client.enroll(&student, &course_id);
@@ -2001,16 +2000,6 @@ fn test_enroll_insufficient_funds_rollback() {
     assert_eq!(token_client.balance(&treasury), 0);
     assert_eq!(token_client.balance(&student), 150_000_000);
     assert_eq!(token_client.balance(&contract_id), 0);
-=======
-    // Enrollment exits cleanly when the token transfer fails.
-    client.enroll(&student, &course_id);
-
-    // Verify no funds moved and no enrollment state was written.
-    assert_eq!(token_client.balance(&treasury), 0);
-    assert_eq!(token_client.balance(&student), 150_000_000);
-    assert_eq!(token_client.balance(&contract_id), 0);
-    assert!(!client.is_enrolled(&student, &course_id));
->>>>>>> pr/557
 =======
     // Enrollment exits cleanly when the token transfer fails.
     client.enroll(&student, &course_id);
@@ -2728,13 +2717,13 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
->>>>>>> pr/554
-=======
-        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 >>>>>>> pr/557
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 >>>>>>> pr/559
+=======
+        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
+>>>>>>> pr/562
     }));
     assert!(res.is_err(), "old admin must be rejected by process_refund");
 
@@ -13860,4 +13849,43 @@ fn test_randomized_token_solvency_after_financial_operations() {
 
         assert_solvency(&format!("random operation {step}"));
     }
+}
+
+
+#[test]
+fn test_treasury_getters_without_pending_update() {
+    let (env, contract_id, _token_id, _admin, _sec_admin, treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    assert_eq!(client.get_treasury(), treasury);
+    assert_eq!(client.get_pending_treasury(), None);
+}
+
+#[test]
+fn test_treasury_getters_before_and_after_delay() {
+    let (env, contract_id, _token_id, admin, sec_admin, treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let new_treasury = Address::generate(&env);
+
+    let scheduled_at = env.ledger().sequence();
+    client.update_treasury(&admin, &sec_admin, &new_treasury);
+    let effective_ledger = scheduled_at + 100;
+
+    // Before the delay: old treasury is effective, update is pending.
+    assert_eq!(client.get_treasury(), treasury);
+    let pending = client.get_pending_treasury().unwrap();
+    assert_eq!(pending.address, new_treasury);
+    assert_eq!(pending.effective_ledger, effective_ledger);
+
+    // One ledger before the boundary: still pending.
+    env.ledger()
+        .with_mut(|l| l.sequence_number = effective_ledger - 1);
+    assert_eq!(client.get_treasury(), treasury);
+    assert!(client.get_pending_treasury().is_some());
+
+    // At the boundary: new treasury is effective, nothing is pending.
+    env.ledger()
+        .with_mut(|l| l.sequence_number = effective_ledger);
+    assert_eq!(client.get_treasury(), new_treasury);
+    assert_eq!(client.get_pending_treasury(), None);
 }
