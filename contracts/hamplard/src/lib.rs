@@ -2694,12 +2694,12 @@ impl HamplardContract {
                 .unwrap_or_else(|| panic!("platform enrollment counter overflow"))),
         );
 
-        Self::update_instructor_stats(env, &course.instructor, |s| {
-            s.total_students = s
-                .total_students
-                .checked_add(1)
-                .unwrap_or_else(|| panic!("instructor stats overflow"));
-        });
+        if course.price > 0 {
+            Self::update_instructor_stats(env, &course.instructor, |s| {
+                s.total_students = s.total_students.checked_add(1)
+                    .unwrap_or_else(|| panic!("instructor stats overflow"));
+            });
+        }
 
         Self::increment_student_enrollment_count(env, student);
 
@@ -2884,12 +2884,12 @@ impl HamplardContract {
                 .unwrap_or_else(|| panic!("platform enrollment counter overflow"))),
         );
 
-        Self::update_instructor_stats(env, &course.instructor, |s| {
-            s.total_students = s
-                .total_students
-                .checked_add(1)
-                .unwrap_or_else(|| panic!("instructor stats overflow"));
-        });
+        if course.price > 0 {
+            Self::update_instructor_stats(env, &course.instructor, |s| {
+                s.total_students = s.total_students.checked_add(1)
+                    .unwrap_or_else(|| panic!("instructor stats overflow"));
+            });
+        }
 
         env.events().publish(
             (Symbol::new(env, "student_enrolled"), course_id.clone()),
@@ -3128,12 +3128,12 @@ impl HamplardContract {
                 .unwrap_or_else(|| panic!("platform enrollment counter overflow"))),
         );
 
-        Self::update_instructor_stats(&env, &course.instructor, |s| {
-            s.total_students = s
-                .total_students
-                .checked_add(1)
-                .unwrap_or_else(|| panic!("instructor stats overflow"));
-        });
+        if course.price > 0 {
+            Self::update_instructor_stats(&env, &course.instructor, |s| {
+                s.total_students = s.total_students.checked_add(1)
+                    .unwrap_or_else(|| panic!("instructor stats overflow"));
+            });
+        }
 
         Self::increment_student_enrollment_count(&env, &student);
 
