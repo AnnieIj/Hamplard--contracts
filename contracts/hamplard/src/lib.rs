@@ -829,10 +829,15 @@ impl HamplardContract {
     const MAX_CATEGORIES: u32 = 10;
     /// Maximum length of a category name in characters (#165)
     const MAX_CATEGORY_LEN: u32 = 64;
+<<<<<<< HEAD
     /// Maximum number of co-instructors that can be attached to one course.
     const MAX_CO_INSTRUCTORS: u32 = 10;
     /// Revenue shares are expressed in basis points (100% = 10 000 bps).
     const MAX_SHARE_BPS: u32 = 10_000;
+=======
+    /// Maximum length of a certificate revocation reason (#411)
+    const MAX_REVOCATION_REASON_LEN: u32 = 64;
+>>>>>>> pr/568
 
     // ----------------------------------------------------------
     // INIT
@@ -3315,6 +3320,7 @@ impl HamplardContract {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                 panic!("token transfer amount mismatch");
 =======
 >>>>>>> pr/557
@@ -3324,6 +3330,8 @@ impl HamplardContract {
 >>>>>>> pr/562
 =======
 >>>>>>> pr/563
+=======
+>>>>>>> pr/568
                 return;
             }
 
@@ -3875,9 +3883,19 @@ impl HamplardContract {
     /// - `admin`          — must match stored admin
     /// - `certificate_id` — the certificate to revoke
     /// - `reason`         — short reason code (e.g. "ACADEMIC_DISHONESTY", "ISSUED_IN_ERROR")
+    ///   must be non-empty and at most `MAX_REVOCATION_REASON_LEN` (64) bytes
+    ///
+    /// # Panics
+    /// - If `reason` is empty or longer than 64 bytes
     pub fn revoke_certificate(env: Env, admin: Address, certificate_id: String, reason: String) {
         admin.require_auth();
         Self::require_admin(&env, &admin, "revoke_certificate");
+        if reason.len() == 0 {
+            panic!("revocation reason cannot be empty");
+        }
+        if reason.len() > Self::MAX_REVOCATION_REASON_LEN {
+            panic!("revocation reason exceeds maximum length");
+        }
         env.storage()
             .instance()
             .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);

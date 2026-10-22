@@ -4,6 +4,7 @@
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 ### Storage layout change
 
 - `Course` gains two fields, `total_refunded: i128` and `refund_count: u32`, updated by both refund paths (`process_refund` and `archive_course`) so admins can read per-course refund rates on-chain via `get_course`. `Course` is a `#[contracttype]` struct, so courses stored before this change lack the new keys and will not deserialize against the new type; redeploy fresh, or migrate existing `Course` / `ArchivedCourse` entries before upgrading a live contract.
@@ -23,6 +24,11 @@
 ### Removed
 - Stale root `TODO.md` checklist.
 >>>>>>> pr/563
+=======
+### Changed
+
+- `revoke_certificate` now panics if `reason` is empty (`revocation reason cannot be empty`) or longer than 64 bytes (`revocation reason exceeds maximum length`). Callers passing an empty or oversize reason must shorten or supply one.
+>>>>>>> pr/568
 
 ### Breaking change
 

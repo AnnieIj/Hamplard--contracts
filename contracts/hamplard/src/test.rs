@@ -1969,7 +1969,6 @@ fn test_enroll_insufficient_funds_rollback() {
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &150_000_000);
 
 <<<<<<< HEAD
-<<<<<<< HEAD
     // The token transfer fails, so enroll() emits an EnrollmentFailed event
     // and returns without recording an enrollment or moving any funds.
     client.enroll(&student, &course_id);
@@ -2000,16 +1999,6 @@ fn test_enroll_insufficient_funds_rollback() {
     assert_eq!(token_client.balance(&treasury), 0);
     assert_eq!(token_client.balance(&student), 150_000_000);
     assert_eq!(token_client.balance(&contract_id), 0);
-=======
-    // Enrollment exits cleanly when the token transfer fails.
-    client.enroll(&student, &course_id);
-
-    // Verify no funds moved and no enrollment state was written.
-    assert_eq!(token_client.balance(&treasury), 0);
-    assert_eq!(token_client.balance(&student), 150_000_000);
-    assert_eq!(token_client.balance(&contract_id), 0);
-    assert!(!client.is_enrolled(&student, &course_id));
->>>>>>> pr/563
 }
 
 #[test]
@@ -2717,13 +2706,13 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
->>>>>>> pr/559
-=======
-        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 >>>>>>> pr/562
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 >>>>>>> pr/563
+=======
+        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
+>>>>>>> pr/568
     }));
     assert!(res.is_err(), "old admin must be rejected by process_refund");
 
@@ -14023,4 +14012,102 @@ fn benchmark_register_course_against_50_course_catalog() {
     );
 
     print_budget(&env, "register_course_catalog_50");
+}
+
+
+// REVOCATION REASON VALIDATION (#411)
+
+/// Enroll, complete and issue a certificate; returns its ID.
+fn issue_cert_for_reason_tests(
+    env: &Env,
+    client: &HamplardContractClient,
+    token_id: &Address,
+    admin: &Address,
+    instructor: &Address,
+) -> String {
+    let student = Address::generate(env);
+    token::StellarAssetClient::new(env, token_id).mint(&student, &100_000_000_000);
+    register_and_approve_course(
+        env,
+        client,
+        token_id,
+        admin,
+        instructor,
+        "COURSE-REASON",
+        600_000_000,
+    );
+    let course_id = String::from_str(env, "COURSE-REASON");
+    let cert_id = String::from_str(env, "CERT-REASON");
+
+    client.enroll(&student, &course_id);
+    client.mark_completed(
+        admin,
+        &student,
+        &course_id,
+        &Some(evidence_hash(env, "evidence")),
+    );
+    client.issue_certificate(
+        admin,
+        &student,
+        &course_id,
+        &cert_id,
+        &String::from_str(env, "Reason Course"),
+        &get_enrollment_ref(env, client, &student, "COURSE-REASON"),
+        &None,
+        &None,
+    );
+    cert_id
+}
+
+#[test]
+#[should_panic(expected = "revocation reason cannot be empty")]
+fn test_revoke_certificate_empty_reason_panics() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let cert_id = issue_cert_for_reason_tests(&env, &client, &token_id, &admin, &instructor);
+
+    client.revoke_certificate(&admin, &cert_id, &String::from_str(&env, ""));
+}
+
+#[test]
+#[should_panic(expected = "revocation reason exceeds maximum length")]
+fn test_revoke_certificate_oversize_reason_panics() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let cert_id = issue_cert_for_reason_tests(&env, &client, &token_id, &admin, &instructor);
+
+    let too_long = "R".repeat(65);
+    client.revoke_certificate(&admin, &cert_id, &String::from_str(&env, &too_long));
+}
+
+#[test]
+fn test_revoke_certificate_reason_at_max_length_accepted() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let cert_id = issue_cert_for_reason_tests(&env, &client, &token_id, &admin, &instructor);
+
+    let max_reason = String::from_str(&env, &"R".repeat(64));
+    client.revoke_certificate(&admin, &cert_id, &max_reason);
+
+    let cert = client.get_certificate(&admin, &cert_id);
+    assert!(cert.revoked);
+    assert_eq!(cert.revocation_reason, Some(max_reason));
+}
+
+#[test]
+fn test_revoke_certificate_rejected_reason_leaves_certificate_unrevoked() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let cert_id = issue_cert_for_reason_tests(&env, &client, &token_id, &admin, &instructor);
+
+    assert!(client
+        .try_revoke_certificate(&admin, &cert_id, &String::from_str(&env, ""))
+        .is_err());
+    assert!(client
+        .try_revoke_certificate(&admin, &cert_id, &String::from_str(&env, &"R".repeat(65)))
+        .is_err());
+
+    let cert = client.get_certificate(&admin, &cert_id);
+    assert!(!cert.revoked);
+    assert_eq!(cert.revocation_reason, None);
 }
