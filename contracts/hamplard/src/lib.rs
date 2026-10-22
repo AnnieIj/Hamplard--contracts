@@ -4766,10 +4766,15 @@ impl HamplardContract {
         Self::read_total_active_enrollments(&env)
     }
 
-    /// Update the minimum review delay (in ledger sequences)
+    /// Update the minimum review delay (in ledger sequences).
+    /// Maximum: 120,960 ledgers (approximately seven days at five seconds per ledger).
+    /// Longer delays could indefinitely prevent course approvals.
     pub fn update_min_review_delay(env: Env, admin: Address, delay: u32) {
+        const MAX_REVIEW_DELAY_LEDGERS: u32 = 120_960;
+
         admin.require_auth();
         Self::require_admin(&env, &admin, "update_min_review_delay");
+        assert!(delay <= MAX_REVIEW_DELAY_LEDGERS, "review delay exceeds maximum");
         env.storage()
             .instance()
             .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);

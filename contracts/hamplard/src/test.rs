@@ -12422,3 +12422,25 @@ fn test_archive_course_without_refunds_leaves_refund_stats_zero() {
     assert_eq!(course.refund_count, 0);
     assert_eq!(course.total_refunded, 0);
 }
+
+
+
+// Issue #442: bound the admin-configurable review period so approval remains possible.
+#[test]
+fn test_min_review_delay_accepts_maximum() {
+    let (env, contract_id, _, admin, _, _, _) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    client.update_min_review_delay(&admin, &120_960u32);
+    assert_eq!(client.get_min_review_delay(), 120_960u32);
+}
+
+#[test]
+fn test_min_review_delay_rejects_values_above_maximum_without_mutation() {
+    let (env, contract_id, _, admin, _, _, _) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    client.update_min_review_delay(&admin, &10u32);
+
+    assert!(client.try_update_min_review_delay(&admin, &120_961u32).is_err());
+    assert!(client.try_update_min_review_delay(&admin, &u32::MAX).is_err());
+    assert_eq!(client.get_min_review_delay(), 10u32);
+}
