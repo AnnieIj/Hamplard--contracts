@@ -3500,6 +3500,80 @@ fn test_add_approved_token_unauthorized_includes_operation() {
     client.add_approved_token(&instructor, &new_token);
 }
 
+// ============================================================
+// ISSUE #439: is_token_approved / get_approved_tokens
+// ============================================================
+
+#[test]
+fn test_is_token_approved_returns_true_after_add() {
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let new_token = Address::generate(&env);
+    assert!(!client.is_token_approved(&new_token));
+
+    client.add_approved_token(&admin, &new_token);
+    assert!(client.is_token_approved(&new_token));
+}
+
+#[test]
+fn test_is_token_approved_returns_false_after_remove() {
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let new_token = Address::generate(&env);
+    client.add_approved_token(&admin, &new_token);
+    assert!(client.is_token_approved(&new_token));
+
+    client.remove_approved_token(&admin, &new_token);
+    assert!(!client.is_token_approved(&new_token));
+}
+
+#[test]
+fn test_get_approved_tokens_reflects_add_and_remove() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    // token_id was whitelisted by setup() — it should appear in the list
+    let extra_token = Address::generate(&env);
+    client.add_approved_token(&admin, &extra_token);
+
+    let list = client.get_approved_tokens(&admin);
+    assert!(list.contains(&token_id));
+    assert!(list.contains(&extra_token));
+
+    // Remove the extra token and confirm it is gone from the list
+    client.remove_approved_token(&admin, &extra_token);
+    let list_after = client.get_approved_tokens(&admin);
+    assert!(list_after.contains(&token_id));
+    assert!(!list_after.contains(&extra_token));
+}
+
+#[test]
+fn test_add_approved_token_idempotent() {
+    // Adding the same token twice must not create duplicate list entries.
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let new_token = Address::generate(&env);
+    client.add_approved_token(&admin, &new_token);
+    client.add_approved_token(&admin, &new_token); // second call is a no-op
+
+    let list = client.get_approved_tokens(&admin);
+    let count = list.iter().filter(|t| *t == new_token).count();
+    assert_eq!(count, 1, "token should appear exactly once in the list");
+}
+
+#[test]
+#[should_panic(expected = "unauthorized: get_approved_tokens")]
+fn test_get_approved_tokens_unauthorized() {
+    let (env, contract_id, _token_id, _admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    // Non-admin should not be able to enumerate the whitelist
+    client.get_approved_tokens(&instructor);
+}
+
 #[test]
 #[should_panic(expected = "Error(Contract, #2)")]
 fn test_revoke_certificate_unauthorized_includes_operation() {
