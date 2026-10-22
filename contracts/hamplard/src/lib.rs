@@ -133,11 +133,19 @@
 //! - Expiry may be cleared by calling `set_admin_expiry()` with `None` before it takes effect
 //!
 //! ## Payment Guarantees
-//! - On enrollment the full course price is transferred from the student atomically:
-//!   `platform_fee_percent` of the price is forwarded to the treasury address immediately;
-//!   the remaining instructor share is held inside the contract and credited to
-//!   `DataKey::InstructorEarnings` for pull-based withdrawal.
-//! - Revenue split uses integer arithmetic: `platform_amount = price * pct / 100`.
+//! - On enrollment the full course price is transferred from the student atomically.
+//!   The platform fee is computed by `deduct_fee()` and forwarded to the treasury
+//!   address immediately; the remaining instructor share is held inside the contract
+//!   and credited to `DataKey::InstructorEarnings` for pull-based withdrawal.
+//! - Fees are charged in **basis points**, not percent. The base rate comes from the
+//!   per-token `FeeConfig(token)` (set via `set_fee_config`), falling back to
+//!   `DefaultFee` converted to bps when no per-token override exists. A course's
+//!   explicit registration-time `platform_fee_percent` acts only as a floor on the
+//!   live per-token rate.
+//! - When risk pricing is enabled (`set_risk_config_enabled` + `set_risk_fee_config`),
+//!   `deduct_fee()` adds risk surcharges in bps for large payments, new customers,
+//!   and BTC/ETH-denominated tokens, capped at 10000 bps (100%).
+//! - Fee arithmetic uses integer basis points: `platform_fee = amount * effective_bps / 10000`.
 //!   Any remainder (from integer truncation) stays with the instructor share.
 //! - The contract does **not** escrow student funds beyond the enrollment transaction;
 //!   post-enrollment refunds require admin-initiated archiving with an explicit refund list.
