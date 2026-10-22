@@ -401,7 +401,9 @@ pub struct Course {
     pub platform_fee_percent: u32,
     /// USDC token contract address (Stellar Asset Contract)
     pub token: Address,
-    /// Total number of enrollments (incremented on each enroll)
+    /// Total number of non-refunded enrollments (incremented on each enroll
+    /// and re-enroll, decremented when an enrollment is refunded). `max_capacity`
+    /// is a lifetime cap on this counter, so a refund releases a seat.
     pub total_enrollments: u32,
     /// Total active enrollments (enrolled but not completed)
     pub active_enrollments: u32,
@@ -864,6 +866,11 @@ impl HamplardContract {
     /// after which a course is automatically paused as a circuit breaker.
     /// Reset to 0 on a successful enrollment. (#178)
     const CIRCUIT_BREAKER_THRESHOLD: u32 = 5;
+    /// Upper bound for the platform-wide minimum completion duration.
+    /// At 5 seconds per ledger this is roughly 58 days. Without an upper
+    /// bound an extreme value would make every newly registered course
+    /// impossible to complete. (#444)
+    pub(crate) const MAX_MIN_COMPLETION_LEDGERS: u32 = 1_000_000;
     /// Maximum number of categories a course can have (#165)
     const MAX_CATEGORIES: u32 = 10;
     /// Maximum length of a category name in characters (#165)
@@ -1846,12 +1853,20 @@ impl HamplardContract {
                         if course.active_enrollments > 0 {
                             course.active_enrollments -= 1;
                         }
+                        // Capacity is a lifetime cap on non-refunded
+                        // enrollments, so a refund releases the seat. (#324)
+                        if course.total_enrollments > 0 {
+                            course.total_enrollments -= 1;
+                        }
 
                         Self::dec_total_active(&env);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> pr/557
 =======
+=======
+>>>>>>> pr/573
                         Self::emit_refund_issued(
                             &env,
                             &course_id,
@@ -1861,7 +1876,10 @@ impl HamplardContract {
                             instructor_amount,
                         );
 
+<<<<<<< HEAD
 >>>>>>> pr/559
+=======
+>>>>>>> pr/573
                         Self::promote_from_waitlist(&env, &course_id);
                     }
                 }
@@ -3421,6 +3439,7 @@ impl HamplardContract {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                 panic!("token transfer amount mismatch");
 =======
 >>>>>>> pr/557
@@ -3432,6 +3451,8 @@ impl HamplardContract {
 >>>>>>> pr/563
 =======
 >>>>>>> pr/568
+=======
+>>>>>>> pr/573
                 return;
             }
 
@@ -3797,6 +3818,98 @@ impl HamplardContract {
         env.events().publish(
             (Symbol::new(&env, "course_completed"), course_id.clone()),
             (course_id.clone(), student, admin, completion_ledger),
+        );
+    }
+
+    /// Permissionlessly clean up an expired, never-completed enrollment.
+    ///
+    /// The expired enrollment is archived to `EnrollmentHistory`, then removed
+    /// from active storage. `course.active_enrollments` and the platform-wide
+    /// `TotalActiveEnrollments` counter are each decremented exactly once; a
+    /// second call fails because the active enrollment no longer exists.
+    ///
+    /// Refunds are explicitly out of scope: this function only releases the
+    /// active-enrollment counters.
+    pub fn expire_enrollment(env: Env, student: Address, course_id: String) {
+        env.storage()
+            .instance()
+            .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
+
+        let mut course = Self::get_course_internal(&env, &course_id)
+            .unwrap_or_else(|| panic!("course not found"));
+        if course.status == CourseStatus::Archived {
+            panic!("course is archived");
+        }
+        let enrollment_key = DataKey::Enrollment(student.clone(), course_id.clone());
+        let enrollment = env
+            .storage()
+            .persistent()
+            .get::<DataKey, Enrollment>(&enrollment_key)
+            .unwrap_or_else(|| panic!("enrollment not found"));
+
+        if enrollment.completed {
+            panic!("completed enrollment cannot expire");
+        }
+        if enrollment.is_refunded {
+            panic!("refunded enrollment cannot expire");
+        }
+
+        let expiry_ledgers = course
+            .enrollment_expiry_ledgers
+            .unwrap_or_else(|| panic!("course has no enrollment expiry"));
+        let expiry_at = enrollment
+            .enrolled_at_ledger
+            .checked_add(expiry_ledgers)
+            .unwrap_or(u32::MAX);
+        if env.ledger().sequence() < expiry_at {
+            panic!("enrollment has not expired");
+        }
+
+        // Preserve an audit trail before removing the active record.
+        let history_key = DataKey::EnrollmentHistory(student.clone(), course_id.clone());
+        let mut history: Vec<Enrollment> = env
+            .storage()
+            .persistent()
+            .get(&history_key)
+            .unwrap_or_else(|| Vec::new(&env));
+        history.push_back(enrollment);
+        env.storage().persistent().set(&history_key, &history);
+        env.storage().persistent().extend_ttl(
+            &history_key,
+            Self::PERSISTENT_TTL_THRESHOLD,
+            Self::PERSISTENT_TTL_EXTEND_TO,
+        );
+
+        env.storage().persistent().remove(&enrollment_key);
+
+        if course.active_enrollments > 0 {
+            course.active_enrollments -= 1;
+        }
+        course.last_updated_ledger = env.ledger().sequence();
+        env.storage()
+            .persistent()
+            .set(&DataKey::Course(course_id.clone()), &course);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Course(course_id.clone()),
+            Self::PERSISTENT_TTL_THRESHOLD,
+            Self::PERSISTENT_TTL_EXTEND_TO,
+        );
+
+        let total_active: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalActiveEnrollments)
+            .unwrap_or(0);
+        if total_active > 0 {
+            env.storage()
+                .instance()
+                .set(&DataKey::TotalActiveEnrollments, &(total_active - 1));
+        }
+
+        let expired_at_ledger = env.ledger().sequence();
+        env.events().publish(
+            (Symbol::new(&env, "enrollment_expired"), course_id.clone()),
+            (student, course_id, expired_at_ledger),
         );
     }
 
@@ -4996,6 +5109,17 @@ impl HamplardContract {
             .instance()
             .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
 
+<<<<<<< HEAD
+=======
+        if ledgers > Self::MAX_MIN_COMPLETION_LEDGERS {
+            panic!(
+                "min completion ledgers {} exceeds maximum allowed {}",
+                ledgers,
+                Self::MAX_MIN_COMPLETION_LEDGERS
+            );
+        }
+
+>>>>>>> pr/573
         env.storage()
             .instance()
             .set(&DataKey::DefaultMinCompletionLedgers, &ledgers);
@@ -5353,7 +5477,15 @@ impl HamplardContract {
             if course.active_enrollments > 0 {
                 course.active_enrollments -= 1;
             }
+<<<<<<< HEAD
 >>>>>>> pr/556
+=======
+            // Capacity is a lifetime cap on non-refunded enrollments, so a
+            // refund releases the seat. (#324)
+            if course.total_enrollments > 0 {
+                course.total_enrollments -= 1;
+            }
+>>>>>>> pr/573
 
             course.last_updated_ledger = env.ledger().sequence();
             Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
@@ -5364,8 +5496,11 @@ impl HamplardContract {
             Self::dec_total_active(&env);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> pr/557
 =======
+=======
+>>>>>>> pr/573
             Self::emit_refund_issued(
                 &env,
                 &course_id,
@@ -5375,7 +5510,10 @@ impl HamplardContract {
                 instructor_refund,
             );
 
+<<<<<<< HEAD
 >>>>>>> pr/559
+=======
+>>>>>>> pr/573
             request.status = RefundStatus::Approved;
             request.refund_amount = Some(breakdown.refund_amount);
 =======
@@ -6014,6 +6152,7 @@ impl HamplardContract {
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     /// Resolve the effective treasury address, promoting a matured
     /// `PendingTreasury` update if its `effective_ledger` has been reached.
     ///
@@ -6042,6 +6181,8 @@ impl HamplardContract {
 
         treasury
 =======
+=======
+>>>>>>> pr/573
     /// Emit the shared per-student refund event used by both
     /// `process_refund()` and `archive_course()`.
     fn emit_refund_issued(
@@ -6063,6 +6204,7 @@ impl HamplardContract {
                 env.ledger().sequence(),
             ),
         );
+<<<<<<< HEAD
 >>>>>>> pr/559
 =======
     /// Persist a value and extend its TTL in one step.
@@ -6081,6 +6223,8 @@ impl HamplardContract {
             Self::PERSISTENT_TTL_EXTEND_TO,
         );
 >>>>>>> pr/563
+=======
+>>>>>>> pr/573
     }
 
     fn get_course_internal(env: &Env, course_id: &String) -> Option<Course> {
