@@ -281,7 +281,7 @@ Initialises the contract once. The admin must sign.
 
 ### Course management
 
-| Function | Caller | Description |
+| Function | Signer | Description |
 |---|---|---|
 | `register_course(instructor, course_id, price, token, platform_fee_pct, max_capacity, content_hash, categories)` | Instructor | Register a course — starts as Pending |
 | `approve_course(caller, course_id)` | Admin or Approver | Move Pending → Active; high-value courses need two distinct approvals |
@@ -295,7 +295,9 @@ Initialises the contract once. The admin must sign.
 
 ### Enrollment and payments
 
-| Function | Caller | Description |
+### Enrollment, refunds, and earnings
+
+| Function | Signer | Description |
 |---|---|---|
 | `enroll(student, course_id)` | Student | Pay course price; platform fee is forwarded and instructor earnings are credited |
 | `batch_enroll(student, course_ids)` | Student | Enroll in up to 50 courses in one transaction |
@@ -306,7 +308,7 @@ Initialises the contract once. The admin must sign.
 
 ### Completion and certificates
 
-| Function | Caller | Description |
+| Function | Signer | Description |
 |---|---|---|
 | `mark_completed(admin, student, course_id, evidence_hash)` | Admin (+ student when `evidence_hash` is `None`) | Mark an enrollment completed |
 | `issue_certificate(admin, student, course_id, certificate_id, course_title, enrollment_reference, expires_at_ledger, instructor_signature)` | Admin | Issue an on-chain certificate after completion |
@@ -316,7 +318,7 @@ Initialises the contract once. The admin must sign.
 
 ### Arbitration, waitlists, and risk configuration
 
-| Function | Caller | Description |
+| Function | Signer | Description |
 |---|---|---|
 | `escalate_to_arbitration(caller, course_id)` | Student | Open an arbitration case and pay the configured fee |
 | `resolve_arbitration(admin, caller, course_id, for_student)` | Admin | Resolve an open case for the student or instructor |

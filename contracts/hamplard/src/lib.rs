@@ -1893,7 +1893,19 @@ impl HamplardContract {
 
                         Self::dec_total_active(&env);
 
+<<<<<<< HEAD
 >>>>>>> pr/557
+=======
+                        Self::emit_refund_issued(
+                            &env,
+                            &course_id,
+                            &student,
+                            platform_amount + instructor_amount,
+                            platform_amount,
+                            instructor_amount,
+                        );
+
+>>>>>>> pr/559
                         Self::promote_from_waitlist(&env, &course_id);
                     }
                 }
@@ -3487,9 +3499,12 @@ impl HamplardContract {
                     "TRANSFER_AMOUNT_MISMATCH",
                 );
 <<<<<<< HEAD
+<<<<<<< HEAD
                 panic!("token transfer amount mismatch");
 =======
 >>>>>>> pr/557
+=======
+>>>>>>> pr/559
                 return;
             }
 
@@ -5335,7 +5350,19 @@ impl HamplardContract {
             // Decrement platform-wide active enrollment counter
             Self::dec_total_active(&env);
 
+<<<<<<< HEAD
 >>>>>>> pr/557
+=======
+            Self::emit_refund_issued(
+                &env,
+                &course_id,
+                &student,
+                actual_refund_amount,
+                platform_refund,
+                instructor_refund,
+            );
+
+>>>>>>> pr/559
             request.status = RefundStatus::Approved;
             request.refund_amount = Some(breakdown.refund_amount);
         } else {
@@ -5825,6 +5852,7 @@ impl HamplardContract {
     // INTERNAL HELPERS
     // ----------------------------------------------------------
 
+<<<<<<< HEAD
     /// Resolve the effective treasury address, promoting a matured
     /// `PendingTreasury` update if its `effective_ledger` has been reached.
     ///
@@ -5852,6 +5880,29 @@ impl HamplardContract {
         }
 
         treasury
+=======
+    /// Emit the shared per-student refund event used by both
+    /// `process_refund()` and `archive_course()`.
+    fn emit_refund_issued(
+        env: &Env,
+        course_id: &String,
+        student: &Address,
+        amount: i128,
+        platform_amount: i128,
+        instructor_amount: i128,
+    ) {
+        env.events().publish(
+            (Symbol::new(env, "refund_issued"), course_id.clone()),
+            (
+                student.clone(),
+                course_id.clone(),
+                amount,
+                platform_amount,
+                instructor_amount,
+                env.ledger().sequence(),
+            ),
+        );
+>>>>>>> pr/559
     }
 
     fn get_course_internal(env: &Env, course_id: &String) -> Option<Course> {
