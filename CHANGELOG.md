@@ -2,16 +2,12 @@
 
 ## Unreleased
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 ### Storage layout change
 
 - `Course` gains two fields, `total_refunded: i128` and `refund_count: u32`, updated by both refund paths (`process_refund` and `archive_course`) so admins can read per-course refund rates on-chain via `get_course`. `Course` is a `#[contracttype]` struct, so courses stored before this change lack the new keys and will not deserialize against the new type; redeploy fresh, or migrate existing `Course` / `ArchivedCourse` entries before upgrading a live contract.
-=======
 ### Changed
 
 - `set_risk_fee_config` now panics if any surcharge exceeds 10000 bps, or if the platform default fee plus all three surcharges exceeds 10000 bps. Previously such values were accepted and silently capped at payment time.
->>>>>>> pr/580
 
 ### Breaking change
 
@@ -64,8 +60,6 @@
 
 ### Migration
 - Existing `InstructorTotalEarnings` entries are no longer read. Historic cross-token totals cannot be decomposed into per-token amounts, so per-token lifetime counters start from zero after upgrade; refunds use saturating subtraction so pre-upgrade enrollments remain refundable.
-=======
 - `enroll(student, course_id, max_price)`, `batch_enroll(student, course_ids, max_price)` and `re_enroll(student, course_id, max_price)` now take a `max_price` argument and revert when the course's current price exceeds it, so a price change between quote and execution can never charge a student more than they approved (#361).
->>>>>>> pr/597
 
 - `enroll(student, course_id, max_price)`, `batch_enroll(student, course_ids, max_price)` and `re_enroll(student, course_id, max_price)` now take a `max_price` argument and revert when the course's current price exceeds it, so a price change between quote and execution can never charge a student more than they approved (#361).

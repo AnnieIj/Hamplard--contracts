@@ -2355,7 +2355,6 @@ fn test_enroll_insufficient_funds_rollback() {
     assert_eq!(course.active_enrollments, 0);
 
     // Verify treasury didn't receive any tokens and no balances moved
->>>>>>> pr/552
     assert_eq!(token_client.balance(&treasury), 0);
     assert_eq!(token_client.balance(&student), 150_000_000);
     assert_eq!(token_client.balance(&contract_id), 0);
@@ -3060,28 +3059,12 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
     client.request_refund(&refund_student, &refund_course_id);
 
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
-=======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
->>>>>>> pr/585
-=======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
->>>>>>> pr/586
-=======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
->>>>>>> pr/601
-=======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None::<i128>);
->>>>>>> pr/602
-=======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
->>>>>>> pr/604
     }));
     assert!(res.is_err(), "old admin must be rejected by process_refund");
 

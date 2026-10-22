@@ -9,7 +9,6 @@ canonical counter before accepting an enrollment.
 showed that leaving it in instance storage would still rewrite the instance
 on every enrollment, even after moving the active-enrollment count.
 
-<<<<<<< HEAD
 ## Platform enrollment cap
 
 `set_platform_enrollment_cap()` rejects a new cap that is below the
@@ -19,14 +18,12 @@ call panics instead of accepting an impossible cap. A cap equal to the
 current total is allowed and effectively blocks further enrollments until
 capacity is freed by completion or refund. To lower the cap below the
 current total, admins must first reduce the number of active enrollments.
-=======
 `InstructorCourseCount` and `InstructorPendingCourseCount` likewise move from
 instance storage to per-instructor persistent entries. Previously each new
 instructor added instance entries, so instance size grew with the number of
 instructors and every call became more expensive. These counters now use the
 same persistent read/write helpers and TTL policy as the other counters, so
 instance size no longer grows with the number of instructors.
->>>>>>> pr/608
 
 ## Existing deployments
 
