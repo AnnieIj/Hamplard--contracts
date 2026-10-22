@@ -1,6 +1,6 @@
 # Enrollment counter storage
 
-`TotalActiveEnrollments` is now a persistent `u32` entry, with the existing
+`TotalActiveEnrollments` is now a persistent `uint32` entry, with the existing
 persistent TTL policy. Every enrollment path, completion, refund and archive
 refund uses the same read/write helpers. The platform cap still reads the
 canonical counter before accepting an enrollment.
@@ -8,6 +8,16 @@ canonical counter before accepting an enrollment.
 `EnrollmentRefCounter` also moves to its own persistent entry. Measurement
 showed that leaving it in instance storage would still rewrite the instance
 on every enrollment, even after moving the active-enrollment count.
+
+## Platform enrollment cap
+
+`set_platform_enrollment_cap()` rejects a new cap that is below the
+current `TotalActiveEnrollments`. Allowing such a value would silently
+halt all new enrollments while existing enrollments remain active, so the
+call panics instead of accepting an impossible cap. A cap equal to the
+current total is allowed and effectively blocks further enrollments until
+capacity is freed by completion or refund. To lower the cap below the
+current total, admins must first reduce the number of active enrollments.
 
 ## Existing deployments
 
@@ -19,7 +29,7 @@ enrollment. An upgrade must restore archived persistent counter entries before
 using the contract; it must not discard them and fall back to stale legacy data.
 
 There is no reset of active counts or reuse of existing enrollment references.
-Reference increments now also reject `u32` overflow explicitly. No public
+Reference increments now also reject `uint32` overflow explicitly. No public
 function signature changes. Adding `rlib` alongside `cdylib` allows focused
 integration tests without compiling unrelated, outdated unit-test call sites.
 
