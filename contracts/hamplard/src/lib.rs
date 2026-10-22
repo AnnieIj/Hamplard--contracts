@@ -970,12 +970,16 @@ impl HamplardContract {
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::CourseNotFound));
 
+<<<<<<< HEAD
         let is_admin = Self::is_admin(&env, &caller);
         let is_instructor = caller == course.instructor;
 
         if !is_admin && !is_instructor {
             soroban_sdk::panic_with_error!(&env, Error::Unauthorized);
         }
+=======
+        Self::require_admin_or_instructor(&env, &caller, &course);
+>>>>>>> pr/570
 
         if Self::is_instructor_frozen_internal(&env, &course.instructor) {
             soroban_sdk::panic_with_error!(&env, Error::InstructorFrozen);
@@ -1445,12 +1449,16 @@ impl HamplardContract {
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::CourseNotFound));
 
+<<<<<<< HEAD
         let is_admin = Self::is_admin(&env, &caller);
         let is_instructor = caller == course.instructor;
 
         if !is_admin && !is_instructor {
             soroban_sdk::panic_with_error!(&env, Error::Unauthorized);
         }
+=======
+        Self::require_admin_or_instructor(&env, &caller, &course);
+>>>>>>> pr/570
 
         env.storage()
             .instance()
@@ -1482,6 +1490,7 @@ impl HamplardContract {
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::CourseNotFound));
 
+<<<<<<< HEAD
         let is_admin = Self::is_admin(&env, &caller);
         let is_instructor = caller == course.instructor;
 
@@ -1493,6 +1502,14 @@ impl HamplardContract {
         // instructor must not be able to undo that by unpausing them.
         if !is_admin && Self::is_instructor_frozen_internal(&env, &course.instructor) {
             soroban_sdk::panic_with_error!(&env, Error::InstructorFrozen);
+=======
+        Self::require_admin_or_instructor(&env, &caller, &course);
+
+        // freeze_instructor() auto-pauses the instructor's courses; a frozen
+        // instructor must not be able to undo that by unpausing them.
+        if !Self::is_admin(&env, &caller) && Self::is_instructor_frozen_internal(&env, &course.instructor) {
+            panic!("instructor is frozen");
+>>>>>>> pr/570
         }
 
         env.storage()
@@ -1869,12 +1886,16 @@ impl HamplardContract {
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::CourseNotFound));
 
+<<<<<<< HEAD
         let is_admin = Self::is_admin(&env, &caller);
         let is_instructor = caller == course.instructor;
 
         if !is_admin && !is_instructor {
             soroban_sdk::panic_with_error!(&env, Error::Unauthorized);
         }
+=======
+        Self::require_admin_or_instructor(&env, &caller, &course);
+>>>>>>> pr/570
 
         if Self::is_instructor_frozen_internal(&env, &course.instructor) {
             soroban_sdk::panic_with_error!(&env, Error::InstructorFrozen);
@@ -1941,12 +1962,16 @@ impl HamplardContract {
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::CourseNotFound));
 
+<<<<<<< HEAD
         let is_admin = Self::is_admin(&env, &caller);
         let is_instructor = caller == course.instructor;
 
         if !is_admin && !is_instructor {
             soroban_sdk::panic_with_error!(&env, Error::Unauthorized);
         }
+=======
+        Self::require_admin_or_instructor(&env, &caller, &course);
+>>>>>>> pr/570
 
         if Self::is_instructor_frozen_internal(&env, &course.instructor) {
             soroban_sdk::panic_with_error!(&env, Error::InstructorFrozen);
@@ -1992,15 +2017,19 @@ impl HamplardContract {
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::CourseNotFound));
 
-        let is_admin = Self::is_admin(&env, &caller);
-        let is_instructor = caller == course.instructor;
+        Self::require_admin_or_instructor(&env, &caller, &course);
 
+<<<<<<< HEAD
         if !is_admin && !is_instructor {
             soroban_sdk::panic_with_error!(&env, Error::Unauthorized);
         }
 
         if !is_admin && Self::is_instructor_frozen_internal(&env, &course.instructor) {
             soroban_sdk::panic_with_error!(&env, Error::InstructorFrozen);
+=======
+        if !Self::is_admin(&env, &caller) && Self::is_instructor_frozen_internal(&env, &course.instructor) {
+            panic!("instructor is frozen");
+>>>>>>> pr/570
         }
 
         course.enrollment_expiry_ledgers = expiry_ledgers;
@@ -2035,12 +2064,16 @@ impl HamplardContract {
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::CourseNotFound));
 
+<<<<<<< HEAD
         let is_admin = Self::is_admin(&env, &caller);
         let is_instructor = caller == course.instructor;
 
         if !is_admin && !is_instructor {
             soroban_sdk::panic_with_error!(&env, Error::Unauthorized);
         }
+=======
+        Self::require_admin_or_instructor(&env, &caller, &course);
+>>>>>>> pr/570
 
         if Self::is_instructor_frozen_internal(&env, &course.instructor) {
             soroban_sdk::panic_with_error!(&env, Error::InstructorFrozen);
@@ -2081,15 +2114,19 @@ impl HamplardContract {
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::CourseNotFound));
 
-        let is_admin = Self::is_admin(&env, &caller);
-        let is_instructor = caller == course.instructor;
+        Self::require_admin_or_instructor(&env, &caller, &course);
 
+<<<<<<< HEAD
         if !is_admin && !is_instructor {
             soroban_sdk::panic_with_error!(&env, Error::Unauthorized);
         }
 
         if !is_admin && Self::is_instructor_frozen_internal(&env, &course.instructor) {
             soroban_sdk::panic_with_error!(&env, Error::InstructorFrozen);
+=======
+        if !Self::is_admin(&env, &caller) && Self::is_instructor_frozen_internal(&env, &course.instructor) {
+            panic!("instructor is frozen");
+>>>>>>> pr/570
         }
 
         if course.status == CourseStatus::Archived {
@@ -2146,6 +2183,7 @@ impl HamplardContract {
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::CourseNotFound));
 
+<<<<<<< HEAD
         let is_admin = Self::is_admin(&env, &caller);
         let is_instructor = caller == course.instructor;
 
@@ -2157,6 +2195,14 @@ impl HamplardContract {
         // admin may still update it as an administrative intervention.
         if !is_admin && Self::is_instructor_frozen_internal(&env, &course.instructor) {
             soroban_sdk::panic_with_error!(&env, Error::InstructorFrozen);
+=======
+        Self::require_admin_or_instructor(&env, &caller, &course);
+
+        // A frozen instructor may not alter the content commitment, but an
+        // admin may still update it as an administrative intervention.
+        if !Self::is_admin(&env, &caller) && Self::is_instructor_frozen_internal(&env, &course.instructor) {
+            panic!("instructor is frozen");
+>>>>>>> pr/570
         }
 
         if course.status == CourseStatus::Archived {
@@ -2197,12 +2243,16 @@ impl HamplardContract {
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::CourseNotFound));
 
+<<<<<<< HEAD
         let is_admin = Self::is_admin(&env, &caller);
         let is_instructor = caller == course.instructor;
 
         if !is_admin && !is_instructor {
             soroban_sdk::panic_with_error!(&env, Error::Unauthorized);
         }
+=======
+        Self::require_admin_or_instructor(&env, &caller, &course);
+>>>>>>> pr/570
 
         if Self::is_instructor_frozen_internal(&env, &course.instructor) {
             soroban_sdk::panic_with_error!(&env, Error::InstructorFrozen);
@@ -5886,6 +5936,31 @@ impl HamplardContract {
             {
                 if env.ledger().sequence() >= expires_at {
                     soroban_sdk::panic_with_error!(&env, Error::AdminExpired);
+                }
+            }
+        }
+    }
+
+    /// Require that caller is the course instructor or the platform admin.
+    /// Panics with "unauthorized" otherwise. Also enforces the admin-expiry
+    /// rule when the caller is an admin.
+    fn require_admin_or_instructor(env: &Env, caller: &Address, course: &Course) {
+        let is_admin = Self::is_admin(env, caller);
+        let is_instructor = caller == &course.instructor;
+
+        if !is_admin && !is_instructor {
+            panic!("unauthorized");
+        }
+
+        // Check if admin role has expired
+        if is_admin {
+            if let Some(expires_at) = env
+                .storage()
+                .instance()
+                .get::<DataKey, u32>(&DataKey::AdminExpiresAt)
+            {
+                if env.ledger().sequence() >= expires_at {
+                    panic!("admin role has expired");
                 }
             }
         }
