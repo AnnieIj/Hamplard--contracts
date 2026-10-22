@@ -6247,7 +6247,24 @@ impl HamplardContract {
             .unwrap_or(Self::DEFAULT_REVOCATION_CHALLENGE_PERIOD)
     }
 
-    /// Request a refund for an enrollment within the refund window
+    /// Request a refund for an enrollment within the refund window.
+    ///
+    /// ## Resubmission policy
+    ///
+    /// A student may submit a new refund request for a course whose existing
+    /// record has status `Rejected`, provided the current ledger sequence is
+    /// still inside the refund window (i.e. `current_sequence -
+    /// enrolled_at_ledger <= refund_window`).  When allowed, the `Rejected`
+    /// record is replaced: status is reset to `Pending`, `requested_at_ledger`
+    /// is updated to the current ledger, and the same `refund_requested` event
+    /// is emitted as for a fresh request.
+    ///
+    /// Requests whose existing record has status `Pending` or `Approved` still
+    /// block a new request with `"refund request already exists"` — this
+    /// prevents double refunds regardless of the window.
+    ///
+    /// Outside the window, a resubmission after rejection fails with
+    /// `"refund window has closed for resubmission"`.
     pub fn request_refund(env: Env, student: Address, course_id: String) {
         student.require_auth();
         env.storage()
@@ -6277,6 +6294,7 @@ impl HamplardContract {
             .checked_sub(enrollment.enrolled_at_ledger)
             .unwrap_or(0);
 
+<<<<<<< HEAD
         if elapsed > refund_window {
             soroban_sdk::panic_with_error!(&env, Error::RefundError);
         }
@@ -6286,17 +6304,46 @@ impl HamplardContract {
         if env.storage().persistent().has(&key) {
             soroban_sdk::panic_with_error!(&env, Error::RefundError);
 =======
+=======
+        let key = DataKey::RefundRequest(student.clone(), course_id.clone());
+
+        // Check for an existing record before the window check so we can
+        // give a clearer error for the out-of-window resubmission case.
+>>>>>>> pr/602
         if let Some(existing) = env
             .storage()
             .persistent()
             .get::<DataKey, RefundRequest>(&key)
         {
+<<<<<<< HEAD
             // A cancelled request frees the slot for a fresh request within
             // the window; any other prior request still blocks a new one.
             if existing.status != RefundStatus::Cancelled {
                 panic!("refund request already exists");
             }
 >>>>>>> pr/572
+=======
+            match existing.status {
+                // Pending or Approved requests block any new request to
+                // prevent double refunds.
+                RefundStatus::Pending | RefundStatus::Approved => {
+                    panic!("refund request already exists");
+                }
+                // A Rejected request can be replaced if still inside the
+                // window; outside the window it fails with a clear message.
+                RefundStatus::Rejected => {
+                    if elapsed > refund_window {
+                        panic!("refund window has closed for resubmission");
+                    }
+                    // Fall through to overwrite the rejected record below.
+                }
+            }
+        } else {
+            // No existing record — apply the normal window guard.
+            if elapsed > refund_window {
+                panic!("refund window has expired");
+            }
+>>>>>>> pr/602
         }
 
         let now = env.ledger().sequence();
@@ -6358,7 +6405,16 @@ impl HamplardContract {
         );
     }
 
-    /// Admin processes a pending refund request (approve or reject)
+    /// Admin processes a pending refund request (approve or reject).
+    ///
+    /// Only a request with status `Pending` can be processed.  Calling this
+    /// on an `Approved` or `Rejected` record panics with
+    /// `"refund request is not pending"`.
+    ///
+    /// When `approved = false` the record is updated to `Rejected` and **no
+    /// funds are moved**.  The student may resubmit a new request (resetting
+    /// it to `Pending`) as long as they are still inside the refund window —
+    /// see `request_refund` for the full resubmission policy.
     pub fn process_refund(
         env: Env,
         admin: Address,

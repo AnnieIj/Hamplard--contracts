@@ -2170,7 +2170,6 @@ fn test_enroll_insufficient_funds_rollback() {
     // scoped `enrollment_failed` event with reason INSUFFICIENT_BALANCE.
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &150_000_000);
 
-<<<<<<< HEAD
     // The token transfer fails, so enroll() emits an EnrollmentFailed event
     // and returns without recording an enrollment or moving any funds.
     client.enroll(&student, &course_id);
@@ -2201,18 +2200,6 @@ fn test_enroll_insufficient_funds_rollback() {
     assert_eq!(token_client.balance(&treasury), 0);
     assert_eq!(token_client.balance(&student), 150_000_000);
     assert_eq!(token_client.balance(&contract_id), 0);
-=======
-    // The transfer failure is reported through the failed-enrollment path
-    // instead of a panic, so this call returns without creating an enrollment.
-    client.enroll(&student, &course_id);
-
-    // Verify no tokens moved and no enrollment was recorded (rollback proof)
-    assert_eq!(token_client.balance(&treasury), 0);
-    assert_eq!(token_client.balance(&student), 150_000_000);
-    assert!(client
-        .get_enrollment(&student, &student, &course_id)
-        .is_none());
->>>>>>> pr/601
 }
 
 #[test]
@@ -2923,9 +2910,6 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
->>>>>>> pr/580
-=======
-        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 >>>>>>> pr/584
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
@@ -2936,6 +2920,9 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 >>>>>>> pr/601
+=======
+        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None::<i128>);
+>>>>>>> pr/602
     }));
     assert!(res.is_err(), "old admin must be rejected by process_refund");
 
@@ -17892,4 +17879,351 @@ fn test_re_enroll_price_guard_allows_matching_max_price() {
         .get_enrollment(&student, &student, &course_id)
         .unwrap();
     assert_eq!(enrollment.amount_paid, new_price);
+}
+
+
+// ============================================================
+// ISSUE #320 — REFUND RESUBMISSION AFTER REJECTION
+// ============================================================
+
+/// Reject then resubmit inside the window: the new request is allowed and
+/// the record transitions back to Pending.
+#[test]
+fn test_reject_then_resubmit_inside_window_succeeds() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+
+    // Use a window of 20 ledgers so we have room to move around.
+    client.update_refund_window(&admin, &20u32);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-320-RESUBMIT",
+        500_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-320-RESUBMIT");
+
+    client.enroll(&student, &course_id);
+
+    // First request
+    client.request_refund(&student, &course_id);
+    let first = client.get_refund_request(&student, &course_id).unwrap();
+    assert_eq!(first.status, RefundStatus::Pending);
+
+    // Admin rejects
+    env.mock_all_auths_allowing_non_root_auth();
+    client.process_refund(&admin, &student, &course_id, &false, &None::<i128>);
+    let rejected = client.get_refund_request(&student, &course_id).unwrap();
+    assert_eq!(rejected.status, RefundStatus::Rejected);
+
+    // Student is still enrolled
+    assert!(client.is_enrolled(&student, &course_id));
+
+    // Resubmit while still inside the window (advance by 5, window is 20)
+    env.ledger().with_mut(|l| {
+        l.sequence_number += 5;
+    });
+
+    client.request_refund(&student, &course_id);
+
+    let resubmitted = client.get_refund_request(&student, &course_id).unwrap();
+    assert_eq!(resubmitted.status, RefundStatus::Pending);
+}
+
+/// Reject then resubmit outside the window: must fail with the window-closed
+/// message, not the generic "refund request already exists".
+#[test]
+#[should_panic(expected = "refund window has closed for resubmission")]
+fn test_reject_then_resubmit_outside_window_fails() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+
+    client.update_refund_window(&admin, &5u32);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-320-RESUBMIT-EXP",
+        500_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-320-RESUBMIT-EXP");
+
+    client.enroll(&student, &course_id);
+
+    client.request_refund(&student, &course_id);
+    env.mock_all_auths_allowing_non_root_auth();
+    client.process_refund(&admin, &student, &course_id, &false, &None::<i128>);
+
+    // Advance past the window
+    env.ledger().with_mut(|l| {
+        l.sequence_number += 10;
+    });
+
+    // Must panic with the window-closed message
+    client.request_refund(&student, &course_id);
+}
+
+/// A Pending request still blocks a second request from the same student.
+#[test]
+#[should_panic(expected = "refund request already exists")]
+fn test_pending_request_blocks_second_request() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-320-PENDING-BLOCK",
+        500_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-320-PENDING-BLOCK");
+
+    client.enroll(&student, &course_id);
+    client.request_refund(&student, &course_id);
+
+    // Attempt a second request while the first is Pending
+    client.request_refund(&student, &course_id);
+}
+
+/// An Approved request blocks any further request. After approval the
+/// enrollment is removed, so request_refund panics with "enrollment not found"
+/// before it can even reach the refund-request check.
+#[test]
+#[should_panic(expected = "enrollment not found")]
+fn test_approved_request_blocks_second_request() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-320-APPROVED-BLOCK",
+        500_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-320-APPROVED-BLOCK");
+
+    client.enroll(&student, &course_id);
+    client.request_refund(&student, &course_id);
+
+    env.mock_all_auths_allowing_non_root_auth();
+    client.process_refund(&admin, &student, &course_id, &true, &None::<i128>);
+
+    let approved = client.get_refund_request(&student, &course_id).unwrap();
+    assert_eq!(approved.status, RefundStatus::Approved);
+
+    // Attempt a second request after approval must be blocked
+    client.request_refund(&student, &course_id);
+}
+
+/// Full end-to-end: reject → resubmit → approve.  The refund is paid exactly
+/// once and the enrollment is removed.
+#[test]
+fn test_reject_resubmit_then_approve_pays_once() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    let price: i128 = 1_000_000_000;
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &(price * 10));
+
+    client.update_refund_window(&admin, &50u32);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-320-E2E",
+        price,
+    );
+    let course_id = String::from_str(&env, "COURSE-320-E2E");
+
+    client.enroll(&student, &course_id);
+    let balance_after_enroll = token::Client::new(&env, &token_id).balance(&student);
+
+    // First request → reject
+    client.request_refund(&student, &course_id);
+    env.mock_all_auths_allowing_non_root_auth();
+    client.process_refund(&admin, &student, &course_id, &false, &None::<i128>);
+    assert_eq!(
+        token::Client::new(&env, &token_id).balance(&student),
+        balance_after_enroll,
+        "rejection must not move funds"
+    );
+    assert!(client.is_enrolled(&student, &course_id));
+
+    // Resubmit
+    env.ledger().with_mut(|l| {
+        l.sequence_number += 5;
+    });
+    client.request_refund(&student, &course_id);
+    let resubmitted = client.get_refund_request(&student, &course_id).unwrap();
+    assert_eq!(resubmitted.status, RefundStatus::Pending);
+
+    // Approve
+    env.mock_all_auths_allowing_non_root_auth();
+    client.process_refund(&admin, &student, &course_id, &true, &None::<i128>);
+
+    let balance_after_refund = token::Client::new(&env, &token_id).balance(&student);
+    assert_eq!(
+        balance_after_refund - balance_after_enroll,
+        price,
+        "refund must return exactly the enrolled amount"
+    );
+    assert!(!client.is_enrolled(&student, &course_id));
+
+    let final_request = client.get_refund_request(&student, &course_id).unwrap();
+    assert_eq!(final_request.status, RefundStatus::Approved);
+}
+
+/// Boundary: resubmit exactly at the last ledger of the window (elapsed ==
+/// window) is allowed — the window check is inclusive.
+#[test]
+fn test_resubmit_exactly_at_window_boundary_allowed() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+
+    client.update_refund_window(&admin, &10u32);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-320-BOUNDARY",
+        200_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-320-BOUNDARY");
+
+    client.enroll(&student, &course_id);
+    let enrolled_at = env.ledger().sequence();
+
+    // Request, then reject
+    client.request_refund(&student, &course_id);
+    env.mock_all_auths_allowing_non_root_auth();
+    client.process_refund(&admin, &student, &course_id, &false, &None::<i128>);
+
+    // Advance to exactly enrolled_at + window (the inclusive boundary)
+    env.ledger().with_mut(|l| {
+        l.sequence_number = enrolled_at + 10;
+    });
+
+    // Must succeed: elapsed == window
+    client.request_refund(&student, &course_id);
+
+    let resubmitted = client.get_refund_request(&student, &course_id).unwrap();
+    assert_eq!(resubmitted.status, RefundStatus::Pending);
+}
+
+/// Boundary: resubmit one ledger past the window (elapsed == window + 1) is
+/// rejected with the window-closed message.
+#[test]
+#[should_panic(expected = "refund window has closed for resubmission")]
+fn test_resubmit_one_ledger_past_window_rejected() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+
+    client.update_refund_window(&admin, &10u32);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-320-BOUNDARY-PAST",
+        200_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-320-BOUNDARY-PAST");
+
+    client.enroll(&student, &course_id);
+    let enrolled_at = env.ledger().sequence();
+
+    client.request_refund(&student, &course_id);
+    env.mock_all_auths_allowing_non_root_auth();
+    client.process_refund(&admin, &student, &course_id, &false, &None::<i128>);
+
+    // One ledger beyond the window
+    env.ledger().with_mut(|l| {
+        l.sequence_number = enrolled_at + 11;
+    });
+
+    client.request_refund(&student, &course_id);
+}
+
+/// A rejection of one student's request does not affect a different student's
+/// ability to request, resubmit, or get their own refund.
+#[test]
+fn test_different_student_unaffected_by_other_rejection() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student_a = Address::generate(&env);
+    let student_b = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student_a, &100_000_000_000);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student_b, &100_000_000_000);
+
+    client.update_refund_window(&admin, &20u32);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-320-ISOLATION",
+        300_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-320-ISOLATION");
+
+    client.enroll(&student_a, &course_id);
+    client.enroll(&student_b, &course_id);
+
+    // student_a requests and gets rejected
+    client.request_refund(&student_a, &course_id);
+    env.mock_all_auths_allowing_non_root_auth();
+    client.process_refund(&admin, &student_a, &course_id, &false, &None::<i128>);
+
+    // student_b has no record yet — their fresh request must succeed
+    client.request_refund(&student_b, &course_id);
+    let b_request = client.get_refund_request(&student_b, &course_id).unwrap();
+    assert_eq!(b_request.status, RefundStatus::Pending);
+
+    // student_a can resubmit (still inside window)
+    client.request_refund(&student_a, &course_id);
+    let a_resubmitted = client.get_refund_request(&student_a, &course_id).unwrap();
+    assert_eq!(a_resubmitted.status, RefundStatus::Pending);
 }
