@@ -2381,9 +2381,21 @@ impl HamplardContract {
             .persistent()
             .remove(&DataKey::Course(course_id.clone()));
 
+        // Include refund accounting in the archive event so indexers can reconcile
+        // the operation without replaying every enrollment history entry.
         env.events().publish(
             (Symbol::new(&env, "course_archived"), course_id.clone()),
+<<<<<<< HEAD
             (course_id.clone(), admin1.clone(), admin2.clone(), env.ledger().sequence()),
+=======
+            (
+                course_id.clone(),
+                admin1.clone(),
+                admin2.clone(),
+                refund_count,
+                total_refunded,
+            ),
+>>>>>>> pr/598
         );
     }
 
