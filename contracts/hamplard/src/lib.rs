@@ -1060,6 +1060,11 @@ pub enum DataKey {
     /// preserved when a completed or expired student re-enrolls via
     /// `re_enroll()`.
     EnrollmentHistory(Address, String),
+    /// Ordered list of all registered course IDs (on-chain catalog)
+    CourseList,
+    /// Archived past `Enrollment` records for a (student, course_id) pair,
+    /// preserved when a completed student re-enrolls via `re_enroll()`.
+    EnrollmentHistory(Address, String),
     /// Aggregate reputation stats for an instructor (total students,
     /// completions, certificates issued) — see `InstructorStats`.
     InstructorStats(Address),

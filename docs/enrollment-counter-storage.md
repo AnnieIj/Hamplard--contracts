@@ -33,7 +33,7 @@ instance size no longer grows with the number of instructors.
 Each counter reads persistent storage first. If absent, it reads the existing
 instance value (or its original default). The first mutation writes that value
 forward into persistent storage. The legacy instance value is retained but
-becomes noncanonical, avoiding a migration write to the instance during
+Becomes noncanonical, avoiding a migration write to the instance during
 enrollment. An upgrade must restore archived persistent counter entries before
 using the contract; it must not discard them and fall back to stale legacy data.
 
@@ -52,7 +52,7 @@ integration tests without compiling unrelated, outdated unit-test call sites.
 
 ## Before and after budget
 
-Measured with Soroban SDK 22.0.11 native test execution and the same fixture:
+Measured with Soroban SGK 22.0.11 native test execution and the same fixture:
 two approved courses, one funded student, a platform cap of two, and the default
 budget reset immediately before each enrollment. Setup and the storage snapshot
 assertion are excluded from the recorded costs.
@@ -83,3 +83,11 @@ legacy-count migration, cap enforcement, completion decrement and subsequent
 capacity reuse. The existing unit suite on the base branch fails to compile at
 eight outdated call sites, including missing `process_refund` arguments; those
 unrelated changes are outside this fix.
+
+## Blocklist storage
+
+`TotalActiveEnrollments` and `EnrollmentRefCounter` are not the only keys that
+grew instance storage. `TotalActiveEnrollments` and `EnrollmentRefCounter` were
+addressed in the change above. The per-address blocklists `InstructorBlocked(addr)e
+and `StudentBlocked(addr)remain in instance storage and grow with every blocked
+address. That is tracked separately and is not covered by this document.
