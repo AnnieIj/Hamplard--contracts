@@ -4,6 +4,7 @@
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 ### Storage layout change
 
 - `Course` gains two fields, `total_refunded: i128` and `refund_count: u32`, updated by both refund paths (`process_refund` and `archive_course`) so admins can read per-course refund rates on-chain via `get_course`. `Course` is a `#[contracttype]` struct, so courses stored before this change lack the new keys and will not deserialize against the new type; redeploy fresh, or migrate existing `Course` / `ArchivedCourse` entries before upgrading a live contract.
@@ -14,6 +15,11 @@
 - `expire_enrollment(student, course_id)` permissionlessly cleans up expired, never-completed enrollments, releases both active-enrollment counters exactly once, archives the enrollment history, and emits `enrollment_expired`.
 - `refund_issued` is now emitted once for each student refunded through `process_refund()` or `archive_course()`, including the platform/instructor split.
 >>>>>>> pr/573
+=======
+### Changed
+
+- `set_risk_fee_config` now panics if any surcharge exceeds 10000 bps, or if the platform default fee plus all three surcharges exceeds 10000 bps. Previously such values were accepted and silently capped at payment time.
+>>>>>>> pr/580
 
 ### Breaking change
 

@@ -2154,7 +2154,6 @@ fn test_enroll_insufficient_funds_rollback() {
     token::StellarAssetClient::new(&env, &token_id).mint(&student, &150_000_000);
 
 <<<<<<< HEAD
-<<<<<<< HEAD
     // The token transfer fails, so enroll() emits an EnrollmentFailed event
     // and returns without recording an enrollment or moving any funds.
     client.enroll(&student, &course_id);
@@ -2185,16 +2184,6 @@ fn test_enroll_insufficient_funds_rollback() {
     assert_eq!(token_client.balance(&treasury), 0);
     assert_eq!(token_client.balance(&student), 150_000_000);
     assert_eq!(token_client.balance(&contract_id), 0);
-=======
-    // Enrollment exits cleanly when the token transfer fails.
-    client.enroll(&student, &course_id);
-
-    // Verify no funds moved and no enrollment state was written.
-    assert_eq!(token_client.balance(&treasury), 0);
-    assert_eq!(token_client.balance(&student), 150_000_000);
-    assert_eq!(token_client.balance(&contract_id), 0);
-    assert!(!client.is_enrolled(&student, &course_id));
->>>>>>> pr/578
 }
 
 #[test]
@@ -2905,9 +2894,6 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
->>>>>>> pr/568
-=======
-        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 >>>>>>> pr/572
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
@@ -2921,6 +2907,9 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 >>>>>>> pr/579
+=======
+        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
+>>>>>>> pr/580
     }));
     assert!(res.is_err(), "old admin must be rejected by process_refund");
 
@@ -16643,4 +16632,73 @@ fn test_targeted_auth_archive_with_refunds_requires_both_admins_and_treasury() {
         client.get_course(&course_id).unwrap().status,
         CourseStatus::Archived
     );
+}
+
+
+// RISK FEE CONFIG BOUNDS (#455)
+
+#[test]
+fn test_set_risk_fee_config_accepts_valid_and_boundary_values() {
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    client.set_risk_fee_config(&admin, &500u32, &500_000_000i128, &700u32, &900u32);
+
+    // Default fee is 20% (2000 bps): 2000 + 8000 == 10000 is the exact limit.
+    client.set_risk_fee_config(&admin, &8000u32, &0i128, &0u32, &0u32);
+    client.set_risk_fee_config(&admin, &3000u32, &0i128, &2000u32, &3000u32);
+}
+
+#[test]
+#[should_panic(expected = "large_payment_surcharge_bps cannot exceed 10000")]
+fn test_set_risk_fee_config_rejects_large_payment_surcharge_above_max() {
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    client.set_risk_fee_config(&admin, &10_001u32, &0i128, &0u32, &0u32);
+}
+
+#[test]
+#[should_panic(expected = "new_customer_surcharge_bps cannot exceed 10000")]
+fn test_set_risk_fee_config_rejects_new_customer_surcharge_above_max() {
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    client.set_risk_fee_config(&admin, &0u32, &0i128, &10_001u32, &0u32);
+}
+
+#[test]
+#[should_panic(expected = "btc_eth_surcharge_bps cannot exceed 10000")]
+fn test_set_risk_fee_config_rejects_btc_eth_surcharge_above_max() {
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    client.set_risk_fee_config(&admin, &0u32, &0i128, &0u32, &10_001u32);
+}
+
+#[test]
+#[should_panic(expected = "default fee plus risk surcharges cannot exceed 10000 bps")]
+fn test_set_risk_fee_config_rejects_combined_total_above_max() {
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    // 2000 (default fee) + 8001 = 10001 bps.
+    client.set_risk_fee_config(&admin, &4000u32, &0i128, &2000u32, &2001u32);
+}
+
+#[test]
+fn test_set_risk_fee_config_rejected_values_leave_config_unchanged() {
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    client.set_risk_fee_config(&admin, &500u32, &500_000_000i128, &700u32, &900u32);
+    assert!(client
+        .try_set_risk_fee_config(&admin, &10_001u32, &0i128, &0u32, &0u32)
+        .is_err());
+    assert!(client
+        .try_set_risk_fee_config(&admin, &4000u32, &0i128, &2000u32, &2001u32)
+        .is_err());
+
+    env.as_contract(&contract_id, || {
+        let cfg = HamplardContract::get_risk_fee_config(&env);
+        assert_eq!(cfg.large_payment_surcharge_bps, 500);
+        assert_eq!(cfg.new_customer_surcharge_bps, 700);
+        assert_eq!(cfg.btc_eth_surcharge_bps, 900);
+    });
 }
