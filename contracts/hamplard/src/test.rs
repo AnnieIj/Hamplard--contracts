@@ -2910,9 +2910,6 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
->>>>>>> pr/584
-=======
-        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 >>>>>>> pr/585
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
@@ -2923,6 +2920,9 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None::<i128>);
 >>>>>>> pr/602
+=======
+        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
+>>>>>>> pr/604
     }));
     assert!(res.is_err(), "old admin must be rejected by process_refund");
 
@@ -18226,4 +18226,125 @@ fn test_different_student_unaffected_by_other_rejection() {
     client.request_refund(&student_a, &course_id);
     let a_resubmitted = client.get_refund_request(&student_a, &course_id).unwrap();
     assert_eq!(a_resubmitted.status, RefundStatus::Pending);
+}
+
+
+// ============================================================
+// ISSUE #460 — No way to remove a per-token FeeConfig override
+// ============================================================
+
+#[test]
+fn test_remove_fee_config_restores_default_derived_value() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    // Platform default is 20% → 2000 bps when no override exists.
+    assert_eq!(client.get_fee_config(&token_id).fee_bps, 2000);
+
+    // Set a per-token override, then remove it.
+    client.set_fee_config(&admin, &token_id, &500u32);
+    assert_eq!(client.get_fee_config(&token_id).fee_bps, 500);
+
+    client.remove_fee_config(&admin, &token_id);
+
+    // After removal the token follows DefaultFee again (20% → 2000 bps).
+    assert_eq!(client.get_fee_config(&token_id).fee_bps, 2000);
+}
+
+#[test]
+fn test_remove_fee_config_follows_updated_default_fee() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    // Change the platform default to 15% (→ 1500 bps), then override the token.
+    client.update_default_fee(&admin, &15u32);
+    client.set_fee_config(&admin, &token_id, &500u32);
+    assert_eq!(client.get_fee_config(&token_id).fee_bps, 500);
+
+    client.remove_fee_config(&admin, &token_id);
+
+    // The token now derives its fee from the *current* DefaultFee.
+    assert_eq!(client.get_fee_config(&token_id).fee_bps, 1500);
+}
+
+#[test]
+fn test_remove_fee_config_only_affects_targeted_token() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let other_token = env
+        .register_stellar_asset_contract_v2(Address::generate(&env))
+        .address();
+
+    client.set_fee_config(&admin, &token_id, &500u32);
+    client.set_fee_config(&admin, &other_token, &750u32);
+
+    client.remove_fee_config(&admin, &token_id);
+
+    // Only the targeted token falls back to the default.
+    assert_eq!(client.get_fee_config(&token_id).fee_bps, 2000);
+    // The other token's override must remain untouched.
+    assert_eq!(client.get_fee_config(&other_token).fee_bps, 750);
+}
+
+#[test]
+fn test_remove_fee_config_without_override_is_noop() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    // Removing a never-set override must not panic and must keep the default.
+    client.remove_fee_config(&admin, &token_id);
+    assert_eq!(client.get_fee_config(&token_id).fee_bps, 2000);
+}
+
+#[test]
+fn test_remove_fee_config_emits_event() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    client.set_fee_config(&admin, &token_id, &500u32);
+    client.remove_fee_config(&admin, &token_id);
+
+    let events = env.events().all();
+    let mut found = false;
+    for (contract, topics, data) in events.iter().rev() {
+        if contract != contract_id {
+            continue;
+        }
+        let topic0 = topics.get(0).unwrap();
+        let sym: Symbol = topic0.try_into_val(&env).unwrap();
+        if sym == Symbol::new(&env, "fee_config_removed") {
+            // Topics: ("fee_config_removed", admin); data: token
+            let event_admin: Address = topics.get(1).unwrap().try_into_val(&env).unwrap();
+            assert_eq!(event_admin, admin);
+            let event_token: Address = data.try_into_val(&env).unwrap();
+            assert_eq!(event_token, token_id);
+            found = true;
+            break;
+        }
+    }
+    assert!(found, "fee_config_removed event must be emitted");
+}
+
+#[test]
+fn test_set_fee_config_after_removal_applies_new_override() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    client.set_fee_config(&admin, &token_id, &500u32);
+    client.remove_fee_config(&admin, &token_id);
+
+    // A new override can be set again after removal.
+    client.set_fee_config(&admin, &token_id, &1000u32);
+    assert_eq!(client.get_fee_config(&token_id).fee_bps, 1000);
+}
+
+#[test]
+#[should_panic(expected = "unauthorized: remove_fee_config - caller is not admin")]
+fn test_remove_fee_config_rejects_non_admin() {
+    let (env, contract_id, token_id, _admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let outsider = Address::generate(&env);
+    client.remove_fee_config(&outsider, &token_id);
 }
