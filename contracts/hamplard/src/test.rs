@@ -11619,3 +11619,114 @@ fn test_update_default_fee_emits_event_with_old_and_new_fee_and_ledger() {
     assert_eq!(client.get_platform_fee(&admin), 10u32);
 }
 
+// ============================================================
+// ISSUES #258, #302, #304, #305 — Auditable Events & Fee Preview Tests
+// ============================================================
+
+#[test]
+fn test_do_complete_payment_and_preview_payment_fee_are_read_only() {
+    let (env, contract_id, token_id, _admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    let initial_balance = 1_000_000_000i128;
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &initial_balance);
+
+    // Call preview_payment_fee
+    let preview = client.preview_payment_fee(&student, &token_id, &500_000_000i128);
+    assert_eq!(preview.payment_amount, 500_000_000i128);
+
+    // Call do_complete_payment
+    let preview2 = client.do_complete_payment(&student, &token_id, &500_000_000i128);
+    assert_eq!(preview2.payment_amount, 500_000_000i128);
+
+    // Verify student token balance remains unchanged
+    let balance = token::Client::new(&env, &token_id).balance(&student);
+    assert_eq!(balance, initial_balance);
+}
+
+#[test]
+fn test_update_default_fee_emits_fee_updated_event() {
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let ledger_before = env.ledger().sequence();
+    client.update_default_fee(&admin, &15u32);
+
+    let events = env.events().all();
+    let mut found_fee_updated = false;
+
+    for (contract, topics, data) in events.iter() {
+        if contract != contract_id {
+            continue;
+        }
+        let topic0 = topics.get(0).unwrap();
+        let sym: Symbol = topic0.try_into_val(&env).unwrap();
+
+        if sym == Symbol::new(&env, "FeeUpdated") {
+            found_fee_updated = true;
+            // Payload: (old_fee, new_fee, admin, ledger)
+            let (old_fee, new_fee, event_admin, event_ledger): (u32, u32, Address, u32) =
+                data.try_into_val(&env).unwrap();
+            assert_eq!(old_fee, 20u32);
+            assert_eq!(new_fee, 15u32);
+            assert_eq!(event_admin, admin);
+            assert_eq!(event_ledger, ledger_before);
+        }
+    }
+
+    assert!(found_fee_updated, "FeeUpdated event must be emitted by update_default_fee");
+}
+
+#[test]
+#[should_panic(expected = "already enrolled in this course")]
+fn test_enroll_emits_enrollment_failed_event_when_already_enrolled() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+
+    let course_id = String::from_str(&env, "AUDIT-COURSE-01");
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "AUDIT-COURSE-01",
+        100_000_000,
+    );
+
+    client.enroll(&student, &course_id);
+
+    // Second enrollment attempt must panic and emit EnrollmentFailed
+    client.enroll(&student, &course_id);
+}
+
+#[test]
+#[should_panic(expected = "student is blocked")]
+fn test_enroll_emits_enrollment_failed_event_when_student_blocked() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+
+    let course_id = String::from_str(&env, "AUDIT-COURSE-02");
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "AUDIT-COURSE-02",
+        100_000_000,
+    );
+
+    // Block the student
+    client.block_student(&admin, &student);
+
+    // Enrollment must panic and emit EnrollmentFailed
+    client.enroll(&student, &course_id);
+}
