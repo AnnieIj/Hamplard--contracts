@@ -25,6 +25,12 @@
 //! - `pause_platform` / `unpause_platform` — halts or restores all enrollments
 //! - `add_approved_token` / `remove_approved_token` — controls which token contracts are accepted
 //! - `update_default_fee` / `update_max_courses_limit` — updates global parameters
+//! - `set_platform_enrollment_cap` — sets the maximum number of concurrent active
+//!   enrollments. The new cap must be greater than or equal to the current
+//!   `TotalActiveEnrollments`; values below the current total are rejected with
+//!   "cap below active enrollments" so the admin cannot silently halt all
+//!   enrollment. On success the new cap is emitted alongside the current total
+//!   via the `platform_enrollment_cap_set` event for off-chain visibility.
 //! - `block_student` / `unblock_student` — bans or unbans a student from the platform
 //! - `get_platform_fee` — retrieves platform fee configuration (admin only)
 //! - `update_content_hash` — updates the content commitment hash for a course (admin or instructor)
