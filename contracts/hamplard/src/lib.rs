@@ -5660,6 +5660,17 @@ impl HamplardContract {
             panic!("fee_bps cannot exceed 10000");
         }
 
+        // Reject tokens that are not on the approved list — a per-token fee
+        // override for an unapproved token would be dead configuration that
+        // is easy to mistake for a live one.
+        if !env
+            .storage()
+            .persistent()
+            .has(&DataKey::ApprovedToken(token.clone()))
+        {
+            panic!("token is not approved");
+        }
+
         let config = FeeConfig { fee_bps };
         env.storage()
             .instance()
