@@ -451,6 +451,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "co_instructors"
+                      },
+                      "val": {
+                        "vec": []
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "content_hash"
                       },
                       "val": {
@@ -1276,6 +1284,12 @@
                       "val": {
                         "string": "COURSE-WINDOW-EXT"
                       }
+                    },
+                    {
+                      "key": {
+                        "symbol": "refund_amount"
+                      },
+                      "val": "void"
                     },
                     {
                       "key": {

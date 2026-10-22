@@ -1,4 +1,4 @@
-﻿# Hamplard — Contract Repo
+# Hamplard — Contract Repo
 
 > **On-chain course enrollment, payments, and certificate issuance on Stellar Soroban**
 
@@ -25,8 +25,10 @@ The contract provides the core rules for:
 ### Key features
 - multi-admin authorization for sensitive operations
 - course status enforcement and lifecycle rules
-- instructor earnings accounting
-- certificate issuance and revocation tracking
+- instructor earnings accounting, including co-instructor revenue shares
+- refund requests with proportional debits across every revenue recipient
+- certificate issuance, revocation challenges, and expiry tracking
+- arbitration cases, course waitlists, and platform-level safety controls
 - Soroban event emission for off-chain systems and indexers
 
 The detailed documentation below expands on the architecture, data model, contract functions, and deployment flow.
@@ -70,11 +72,11 @@ The Hamplard contract is the trust layer for the platform. It handles three resp
 Instructors register courses on-chain with a price and fee structure. Each course starts as `Pending` — an admin must approve it before students can enroll. This gives the platform moderation control without being able to move anyone's funds.
 
 **2. Enrollment Payments**
-When a student enrolls, the contract automatically splits the payment in a single transaction:
-- Platform fee → treasury address
-- Instructor share → instructor address directly
+When a student enrolls, the contract charges the course price and splits it in a single transaction:
+- Platform fee → treasury address immediately
+- Instructor share → credited to withdrawable instructor earnings (including co-instructor shares)
 
-No escrow needed — the payment splits and lands in both wallets immediately. The contract records the enrollment so no student can enroll twice.
+The instructor share stays in the contract until each recipient calls `withdraw_earnings()`, which is what lets refunds debit the exact balances that were credited. The contract records the enrollment so no student can enroll twice.
 
 **3. On-Chain Certificates**
 After a student completes a course (verified off-chain by the backend), the admin issues an on-chain certificate. Each certificate is a permanent, verifiable record tied to the student's Stellar address and the course. Anyone can verify a certificate by querying `verify_certificate(certificate_id)` — no trusted middleman needed. Certificates can be revoked by the admin if issued in error.
@@ -122,30 +124,67 @@ This keeps the contract small, cheap to call, and focused on what blockchains ar
 
 | Role | Address | Permissions |
 |------|---------|-------------|
-| **Admin** | Set at `init` | Approve/archive courses, mark completions, issue/revoke certificates, update fee |
-| **Instructor** | Set per course | Register courses, pause/unpause their own courses |
-| **Student** | Any address | Enroll in active courses |
-| **Treasury** | Set at `init` | Receives platform fee share (passive recipient only) |
+| **Admin** | Set at `init` | Single-admin configuration and moderation; co-signs every multi-sig operation |
+| **Secondary Admin** | Set at `init` | Must co-sign multi-sig operations: archive, treasury update, admin transfer, token sweep, admin expiry, and upgrades |
+| **Approver** | Granted by an admin | Approve or reject pending courses |
+| **Instructor** | Set per course (`Course.instructor`) | Register courses, manage their own courses, withdraw earnings, co-sign course transfers |
+| **Co-instructor** | `Course.co_instructors` | Passive recipient of a configured revenue share; no privileged entrypoints |
+| **Student** | Any address | Enroll, request refunds, challenge revocations, escalate arbitration, join waitlists |
+| **Treasury** | Set at `init` | Receives the platform fee share (passive recipient only) |
 
 ---
 
 ## Data Structures
 
+> The listings below mirror the `#[contracttype]` definitions in
+> [`contracts/hamplard/src/lib.rs`](contracts/hamplard/src/lib.rs), which is the
+> authoritative interface. Regenerate client bindings from that source rather
+> than copying these snippets by hand.
+
 ### `Course`
 
 ```rust
 pub struct Course {
-    pub id: String,                    // matches backend DB record ID
-    pub instructor: Address,
-    pub price: i128,                   // enrollment price in USDC stroops
-    pub platform_fee_percent: u32,     // 0-100; remainder goes to instructor
-    pub token: Address,                // USDC Stellar Asset Contract
-    pub total_enrollments: u32,
-    pub total_earned: i128,
-    pub status: CourseStatus,          // Pending | Active | Paused | Archived
+    pub id: String,                              // matches backend DB record ID
+    pub instructor: Address,                     // lead instructor
+    pub price: i128,                             // enrollment price in token stroops
+    pub platform_fee_percent: u32,               // 0-100 snapshot; 0 follows live fee config
+    pub token: Address,                          // approved Stellar Asset Contract
+    pub total_enrollments: u32,                  // lifetime enrollments
+    pub active_enrollments: u32,                 // enrolled but not completed/refunded
+    pub total_earned: i128,                      // gross earnings, net of refunds
+    pub status: CourseStatus,                    // Pending | Active | Paused | Rejected | Archived
     pub created_at_ledger: u32,
+    pub max_capacity: Option<u32>,
+    pub enrollment_start_ledger: Option<u32>,
+    pub enrollment_expiry_ledgers: Option<u32>,
+    pub min_completion_ledgers: u32,
+    pub version: u32,                            // incremented on material updates
+    pub last_updated_ledger: u32,
+    pub expires_at_ledger: Option<u32>,
+    pub content_hash: BytesN<32>,                // off-chain content commitment
+    pub max_certificates: Option<u32>,
+    pub certificates_issued: u32,
+    pub prerequisite_course_ids: Vec<String>,
+    pub archived_at_ledger: Option<u32>,
+    pub categories: Vec<String>,
+    pub co_instructors: Vec<CoInstructor>,
 }
 ```
+
+### `CoInstructor`
+
+```rust
+pub struct CoInstructor {
+    pub address: Address,
+    pub share_bps: u32,                          // 0-10_000 bps of the instructor share
+}
+```
+
+Co-instructor shares are taken from the instructor portion of each enrollment
+(after the platform fee). Shares must total at most 10 000 bps; any remainder
+accrues to the lead instructor. The split is configured with
+`set_co_instructors()` and locked once the course receives its first enrollment.
 
 ### `Enrollment`
 
@@ -157,6 +196,14 @@ pub struct Enrollment {
     pub enrolled_at_ledger: u32,
     pub completed: bool,
     pub certificate_issued: bool,
+    pub certificate_id: Option<String>,
+    pub evidence_hash: Option<BytesN<32>>,       // fixed-size completion evidence
+    pub is_refunded: bool,
+    pub course_version: u32,                     // course version at enrollment time
+    pub platform_amount: i128,                   // platform share actually charged
+    pub instructor_amount: i128,                 // instructor share actually credited
+    pub enrollment_ref: String,                  // unique on-chain reference
+    pub completed_at_ledger: Option<u32>,
 }
 ```
 
@@ -164,99 +211,178 @@ pub struct Enrollment {
 
 ```rust
 pub struct Certificate {
-    pub id: String,                    // unique cert ID (UUID from backend)
+    pub id: String,                              // unique certificate ID
     pub student: Address,
     pub course_id: String,
-    pub course_title: String,          // stored on-chain for direct verification
+    pub course_title: String,
+    pub enrollment_reference: String,
     pub instructor: Address,
+    pub issued_by: Address,                      // contract deployment that issued it
     pub issued_at_ledger: u32,
     pub revoked: bool,
+    pub revoked_by: Option<Address>,
+    pub revocation_ledger: Option<u32>,
+    pub revocation_reason: Option<String>,
+    pub expires_at_ledger: Option<u32>,
+    pub instructor_signature: Option<BytesN<64>>,
+    pub revocation_deadline: Option<u32>,        // pending revocation is challengeable until this ledger
 }
 ```
+
+### Supporting types
+
+| Type | Purpose |
+|---|---|
+| `RefundRequest` | Pending/approved/rejected refund request with optional approved amount |
+| `FeeConfig` | Per-token platform fee in basis points |
+| `RiskFeeConfig` / `RiskScore` | Risk-based surcharge configuration and computed score |
+| `ArbitrationCase` | On-chain dispute record with fee, token, and resolution status |
+| `TreasuryUpdate` | Pending treasury address plus its effective ledger |
+| `PendingUpgrade` | Proposed Wasm hash and upgrade time-lock ledger |
+| `InstructorStats` | Aggregate students, completions, and certificates per instructor |
 
 ### `CourseStatus` state machine
 
 ```
 Pending ── approve_course() ──→ Active
+Pending ── reject_course()  ──→ Rejected
 Active  ── pause_course()   ──→ Paused
 Paused  ── unpause_course() ──→ Active
-Active  ── archive_course() ──→ Archived (admin only, permanent)
+Paused  ── archive_course() ──→ Archived (multi-sig, permanent)
+Pending ── archive_course() ──→ Archived (no enrollments exist)
+Rejected ─ archive_course() ──→ Archived (no enrollments exist)
 ```
 
 ---
 
 ## Contract Functions
 
-### `init(admin, treasury, default_fee_pct)`
-Initialises the contract. Called once by the deployer.
+### `init`
+
+```rust
+init(admin, secondary_admin, treasury, default_fee_pct,
+     max_courses_per_instructor, refund_window_ledgers,
+     revocation_challenge_period)
+```
+
+Initialises the contract once. The admin must sign.
 
 ### Course management
 
 | Function | Caller | Description |
 |---|---|---|
-| `register_course(instructor, course_id, price, token, platform_fee_pct)` | Instructor | Register a course — starts as Pending |
-| `approve_course(admin, course_id)` | Admin | Move Pending → Active |
-| `pause_course(caller, course_id)` | Admin or Instructor | Move Active → Paused |
-| `unpause_course(caller, course_id)` | Admin or Instructor | Move Paused → Active |
-| `archive_course(admin, course_id)` | Admin only | Permanently archive |
+| `register_course(instructor, course_id, price, token, platform_fee_pct, max_capacity, content_hash, categories)` | Instructor | Register a course — starts as Pending |
+| `approve_course(caller, course_id)` | Admin or Approver | Move Pending → Active; high-value courses need two distinct approvals |
+| `reject_course(caller, course_id, reason)` | Admin or Approver | Move Pending → Rejected |
+| `pause_course(caller, course_id)` / `unpause_course(caller, course_id)` | Lead instructor or Admin | Move Active ↔ Paused |
+| `update_course(caller, course_id, new_price, new_max_capacity)` | Lead instructor or Admin | Update price/capacity and increment the course version |
+| `set_co_instructors(caller, course_id, addresses, shares_bps)` | Lead instructor or Admin | Configure co-instructors before the first enrollment |
+| `set_enrollment_start_ledger` / `set_enrollment_expiry` / `set_course_expiry` | Lead instructor or Admin | Configure enrollment windows |
+| `set_prerequisite_courses` / `set_max_certificates` / `update_content_hash` | Lead instructor or Admin | Configure prerequisites, certificate cap, and content commitment |
+| `archive_course(admin1, admin2, course_id, students_to_refund)` | Both admins | Permanently archive; optionally refund students |
 
-### Enrollment
-
-| Function | Caller | Description |
-|---|---|---|
-| `enroll(student, course_id)` | Student | Pay and enroll. Splits payment instantly. |
-
-### Completion & Certificates
+### Enrollment and payments
 
 | Function | Caller | Description |
 |---|---|---|
-| `mark_completed(admin, student, course_id, evidence_hash)` | Admin | Called after backend verifies all lessons done. A non-empty `evidence_hash` replaces the student co-signature. |
-| `issue_certificate(admin, student, course_id, cert_id, course_title, enrollment_reference, expires_at_ledger, instructor_signature)` | Admin | Issues on-chain certificate. Requires completion. `enrollment_reference` is a free-form backend ID (e.g. UUID). |
-| `revoke_certificate(admin, cert_id)` | Admin | Flags certificate as revoked |
-| `mark_completed(admin, student, course_id)` | Admin | Called after backend verifies all lessons done |
-| `issue_certificate(admin, cert_id, student, course_id, course_title)` | Admin | Issues on-chain certificate. Requires completion. |
-| `revoke_certificate(admin, cert_id, reason)` | Admin | Flags certificate as revoked |
-| `bulk_revoke_course_certificates(admin, course_id)` | Admin | Flags every certificate of a course as revoked in one transaction |
+| `enroll(student, course_id)` | Student | Pay course price; platform fee is forwarded and instructor earnings are credited |
+| `batch_enroll(student, course_ids)` | Student | Enroll in up to 50 courses in one transaction |
+| `re_enroll(student, course_id)` | Student | Re-enroll after a completed course, archiving the previous enrollment |
+| `withdraw_earnings(instructor, token, amount, destination)` | Instructor | Withdraw accumulated earnings (`amount = 0` withdraws the full balance) |
+| `request_refund(student, course_id)` | Student | Open a refund request within the configured window |
+| `process_refund(admin, student, course_id, approved, refund_amount)` | Admin | Approve or reject a refund and debit each revenue recipient proportionally |
+
+### Completion and certificates
+
+| Function | Caller | Description |
+|---|---|---|
+| `mark_completed(admin, student, course_id, evidence_hash)` | Admin (+ student when `evidence_hash` is `None`) | Mark an enrollment completed |
+| `issue_certificate(admin, student, course_id, certificate_id, course_title, enrollment_reference, expires_at_ledger, instructor_signature)` | Admin | Issue an on-chain certificate after completion |
+| `revoke_certificate(admin, certificate_id, reason)` | Admin | Start a revocation; it becomes permanent after the challenge period |
+| `challenge_revocation(student, certificate_id)` | Certificate holder | Cancel a pending revocation before its deadline |
+| `bulk_revoke_course_certificates(admin, course_id)` | Admin | Revoke every certificate of a course |
+
+### Arbitration, waitlists, and risk configuration
+
+| Function | Caller | Description |
+|---|---|---|
+| `escalate_to_arbitration(caller, course_id)` | Student | Open an arbitration case and pay the configured fee |
+| `resolve_arbitration(admin, caller, course_id, for_student)` | Admin | Resolve an open case for the student or instructor |
+| `join_waitlist(student, course_id)` / `leave_waitlist(student, course_id)` | Student | Manage a capacity waitlist |
+| `set_fee_config(admin, token, fee_bps)` | Admin | Per-token platform fee |
+| `set_arbitration_fee_config(admin, fee_per_case)` | Admin | Arbitration fee |
+| `set_risk_config_enabled(admin, enabled)` / `set_risk_fee_config(...)` | Admin | Risk-surcharge pricing |
 
 ### Admin management
 
 | Function | Caller | Description |
 |---|---|---|
-| `transfer_admin(current_admin, new_admin)` | Admin | Transfer admin role |
-| `update_treasury(admin, new_treasury)` | Admin | Update treasury address |
-| `update_default_fee(admin, new_fee_pct)` | Admin | Update default platform fee |
+| `transfer_admin(admin1, admin2, new_admin, new_secondary_admin)` | Both admins | Propose a new admin pair |
+| `accept_admin(new_admin, new_secondary_admin)` | Both new admins | Accept the proposed admin pair |
+| `update_treasury(admin1, admin2, new_treasury)` | Both admins | Schedule a treasury update |
+| `set_admin_expiry(admin1, admin2, expires_at)` | Both admins | Set or clear the admin-role expiry ledger |
+| `withdraw_tokens(admin1, admin2, token, amount, destination)` | Both admins | Emergency token sweep |
+| `pause_platform(admin)` / `unpause_platform(admin)` | Admin | Halt or restore enrollments |
+| `update_default_fee`, `update_max_courses_limit`, `update_refund_window` | Admin | Global parameters |
+| `block_student` / `unblock_student`, `freeze_instructor` / `unfreeze_instructor` | Admin | Moderation controls |
+| `add_approver` / `remove_approver`, `add_approved_token` / `remove_approved_token` | Admin | Manage approvers and accepted tokens |
 
 ### Read-only queries
 
 | Function | Returns |
-|---|---|---|
+|---|---|
 | `get_course(course_id)` | Full `Course` struct |
-| `get_enrollment(student, course_id)` | Full `Enrollment` struct |
-| `get_certificate(caller, certificate_id)` | Full `Certificate` struct (student, instructor, or admin only) |
+| `get_enrollment(caller, student, course_id)` | `Enrollment` (student, course instructor, or admin only) |
+| `get_certificate(caller, certificate_id)` | `Certificate` (student, course instructor, or admin only) |
 | `is_enrolled(student, course_id)` | `bool` |
-| `has_completed(student, course_id)` | `bool` |
-| `verify_certificate(certificate_id)` | `bool` — true if exists and not revoked |
-| `get_platform_fee()` | `u32` — current default fee % |
+| `has_completed(student, course_id)` | `Option<bool>` |
+| `verify_certificate(certificate_id)` | `bool` — true if it exists, is not permanently revoked, and has not expired |
+| `get_platform_fee(admin)` | `u32` — current default fee percentage (admin only) |
+| `get_instructor_earnings(instructor, token)` | `i128` — withdrawable balance |
+
+> The full, generated interface includes many more configuration and query
+> entrypoints. See the `#[contractimpl]` block in `lib.rs` for the exhaustive
+> list and exact argument types.
 
 ---
 
 ## Revenue Split Logic
 
-When a student calls `enroll()`, the contract calculates the split and executes both transfers in the same transaction:
+When a student calls `enroll()`, the contract charges the full course price, sends
+the platform share to the treasury, and credits the instructor share to
+withdrawable balances inside the contract:
 
 ```
 price = 100 USDC
-platform_fee_percent = 20
+platform fee = 20%
 
 platform_amount   = 100 × 20 / 100 = 20 USDC → treasury
-instructor_amount = 100 - 20       = 80 USDC → instructor
+instructor_amount = 100 - 20       = 80 USDC → credited to instructor earnings
 ```
 
-Both transfers are atomic — if either fails, the whole transaction reverts. The student is never charged without the instructor and treasury being paid.
+The instructor share is not pushed to the instructor at enrollment time. It is
+recorded in `InstructorEarnings(instructor, token)` and paid out when the
+instructor calls `withdraw_earnings()`. This pull-based model lets a later
+refund debit the same balance that was credited earlier.
+
+If the course has co-instructors, the instructor share is split by their
+configured basis-point shares (configured with `set_co_instructors()` before the
+first enrollment). Any remainder goes to the lead instructor:
+
+```
+instructor_amount = 80 USDC
+co-instructor A = 30% of 80 = 24 USDC
+co-instructor B = 20% of 80 = 16 USDC
+lead instructor = 80 - 24 - 16 = 40 USDC
+```
+
+Refunds debit the lead instructor and every co-instructor in the same
+proportions, so no recipient keeps revenue for an enrollment that was refunded.
 
 The platform fee percentage can be:
 - **Global default** (set at `init`, updatable by admin)
-- **Per-course override** (set by instructor at registration time, non-zero value)
+- **Per-token configuration** via `set_fee_config(token, fee_bps)`
+- **Per-course override** captured at registration as a floor on the live fee
 
 ---
 
@@ -310,7 +436,7 @@ hamplard-contract/
         ├── Makefile                   ← Build / deploy shortcuts
         └── src/
             ├── lib.rs                 ← Full contract logic
-            └── test.rs                ← 14 unit tests
+            └── test.rs                ← unit and integration tests
 ```
 
 ---
@@ -350,27 +476,8 @@ cargo test -- --nocapture          # with output
 cargo test test_full_lifecycle     # single test
 ```
 
-Expected:
-```
-running 14 tests
-test test::test_approve_already_active_course ........... ok
-test test::test_approve_course_success .................. ok
-test test::test_approve_course_unauthorized ............. ok
-test test::test_certificate_requires_completion ......... ok
-test test::test_enroll_duplicate ........................ ok
-test test::test_enroll_pending_course ................... ok
-test test::test_enroll_success_with_payment_split ....... ok
-test test::test_full_lifecycle_enroll_complete_certify .. ok
-test test::test_init_success ............................ ok
-test test::test_is_enrolled_check ....................... ok
-test test::test_multiple_students_same_course ........... ok
-test test::test_pause_and_unpause_course ................ ok
-test test::test_register_course_custom_fee .............. ok
-test test::test_register_course_success ................. ok
-test test::test_register_duplicate_course ............... ok
-test test::test_revoke_certificate ...................... ok
-test test::test_update_platform_fee ...................... ok
-```
+Expected: the full suite passes. `cargo test` prints one `ok` line per test
+and a final `test result: ok.` summary (300+ tests).
 
 ---
 
@@ -400,8 +507,12 @@ stellar contract invoke \
   --network testnet \
   -- init \
   --admin <ADMIN_ADDRESS> \
+  --secondary_admin <SECONDARY_ADMIN_ADDRESS> \
   --treasury <TREASURY_ADDRESS> \
-  --default_fee_pct 20
+  --default_fee_pct 20 \
+  --max_courses_per_instructor 50 \
+  --refund_window_ledgers 17280 \
+  --revocation_challenge_period 17280
 ```
 
 ### Register and approve a test course
@@ -417,7 +528,10 @@ stellar contract invoke \
   --course_id "COURSE-TAILORING-001" \
   --price 500000000 \
   --token <USDC_SAC_ADDRESS> \
-  --platform_fee_pct 0
+  --platform_fee_pct 0 \
+  --max_capacity 100 \
+  --content_hash <32_BYTE_HEX> \
+  --categories '["tailoring"]'
 
 # Approve
 stellar contract invoke \
@@ -425,7 +539,7 @@ stellar contract invoke \
   --source my-account \
   --network testnet \
   -- approve_course \
-  --admin <ADMIN_ADDRESS> \
+  --caller <ADMIN_ADDRESS> \
   --course_id "COURSE-TAILORING-001"
 ```
 

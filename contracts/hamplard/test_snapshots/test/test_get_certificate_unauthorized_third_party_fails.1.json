@@ -261,7 +261,7 @@
                   "string": "COURSE-GET-CERT"
                 },
                 {
-                  "string": "evidence_hash"
+                  "bytes": "65766964656e63655f6861736800000000000000000000000000000000000000"
                 }
               ]
             }
@@ -624,6 +624,14 @@
                       },
                       "val": {
                         "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "co_instructors"
+                      },
+                      "val": {
+                        "vec": []
                       }
                     },
                     {
@@ -1092,7 +1100,7 @@
                         "symbol": "evidence_hash"
                       },
                       "val": {
-                        "string": "evidence_hash"
+                        "bytes": "65766964656e63655f6861736800000000000000000000000000000000000000"
                       }
                     },
                     {

@@ -2,41 +2,113 @@
 //!
 //! ## Trust Hierarchy
 //!
-//! | Role              | Who                    | Capabilities                                                          |
-//! |-------------------|------------------------|-----------------------------------------------------------------------|
-//! | Admin             | `DataKey::Admin`       | Approve/archive courses, issue & revoke certificates, pause platform, block students  |
-//! | Secondary Admin   | `DataKey::SecondaryAdmin` | Required alongside Admin for multi-sig operations (archive, treasury update, admin transfer) |
-//! | Instructor        | Course `instructor` field | Register courses, pause/unpause own courses, withdraw earnings, transfer course (with admin co-approval) |
-//! | Student           | Any caller             | Enroll in active courses (must sign), batch-enroll (unless blocked by admin)  |
-//! | Treasury          | `DataKey::Treasury`    | Passive recipient of platform fee share; cannot initiate any action   |
+//! | Role              | Who                        | Capabilities                                                                 |
+//! |-------------------|----------------------------|------------------------------------------------------------------------------|
+//! | Admin             | `DataKey::Admin`           | Single-admin operations below; co-signs every multi-sig operation            |
+//! | Secondary Admin   | `DataKey::SecondaryAdmin`  | Required alongside Admin for multi-sig operations                            |
+//! | Approver          | `DataKey::Approver(addr)`  | Approve or reject pending courses (granted by an admin)                      |
+//! | Instructor        | Course `instructor` field  | Register courses, manage own courses, withdraw earnings, co-sign transfers   |
+//! | Co-instructor     | `Course::co_instructors`   | Passive revenue share; no privileged entrypoint is callable by this role     |
+//! | Student           | Any caller                 | Enroll, request refunds, challenge revocations, escalate disputes, waitlist  |
+//! | Treasury          | `DataKey::Treasury`        | Passive recipient of the platform fee share; cannot initiate any action      |
 //!
-//! ## Privileged Operations (single admin)
-//! - `approve_course` — moves a course from Pending to Active
-//! - `transfer_course` — co-approves an instructor-initiated course ownership transfer
-//! - `mark_completed` — marks a student enrollment as completed (blocked students cannot proceed)
-//! - `issue_certificate` — mints an on-chain certificate of completion (blocked students cannot proceed)
-//! - `revoke_certificate` — flags a certificate as revoked (remains on-chain for audit)
-//! - `process_refund` — approves a pending refund; if the enrollment already has a
-//!   certificate issued, the certificate is revoked with reason `REFUNDED` and a
-//!   `certificate_revoked` event is emitted, so no refunded enrollment can leave
-//!   behind a certificate that verifies as valid. Refund requests are rejected for
-//!   free (price 0) enrollments, since there is no economic value to refund.
-//! - `bulk_revoke_course_certificates` — flags every certificate of a course as revoked in one transaction
-//! - `pause_platform` / `unpause_platform` — halts or restores all enrollments
-//! - `add_approved_token` / `remove_approved_token` — controls which token contracts are accepted
-//! - `update_default_fee` / `update_max_courses_limit` — updates global parameters
-//! - `block_student` / `unblock_student` — bans or unbans a student from the platform
-//! - `get_platform_fee` — retrieves platform fee configuration (admin only)
-//! - `update_content_hash` — updates the content commitment hash for a course (admin or instructor)
+//! ## Privileged Operations — Admin (single signature)
+//! Each entrypoint below calls `require_auth()` on, and checks, the stored Admin
+//! (unless an explicit alternative signer is noted). Admin-expiry checks apply.
 //!
-//! ## Privileged Operations (multi-sig — both Admin + Secondary Admin required)
-//! - `withdraw_tokens` — emergency sweep of contract-held tokens (both admins required)
-//! - `archive_course` — permanent course removal; may trigger student refunds
-//! - `transfer_admin` — proposes a new admin pair (new admins must then call `accept_admin`)
-//! - `update_treasury` — schedules a new treasury address (takes effect after 100 ledgers)
-//! - `set_admin_expiry` — sets a ledger sequence when the admin role expires (blocks all admin operations)
-//! - `propose_upgrade` / `upgrade_contract` / `cancel_upgrade` — time-locked contract code
-//!   upgrade; see "Contract Upgrades" below
+//! - `init` — one-time bootstrap by the deployer/admin; writes the admin pair,
+//!   treasury, fee, refund window and revocation challenge period
+//! - `set_high_value_course_threshold` — sets the price above which course
+//!   approval needs two different admins/approvers
+//! - `pause_platform` / `unpause_platform` — halt or restore all enrollments
+//! - `update_default_fee` — update the global platform fee
+//! - `add_approved_token` / `remove_approved_token` / `set_token_btc_eth` —
+//!   manage the accepted-token allowlist and BTC/ETH risk classification
+//! - `update_max_courses_limit` — cap courses per instructor
+//! - `freeze_instructor` / `unfreeze_instructor` — freeze an instructor (also
+//!   pauses their courses) or lift the freeze
+//! - `add_approver` / `remove_approver` — grant or revoke course-approval rights
+//! - `block_student` / `unblock_student` — ban or unban a student platform-wide
+//! - `set_platform_enrollment_cap` — cap total active enrollments platform-wide
+//! - `update_min_review_delay` — minimum ledgers between registration and approval
+//! - `update_min_completion_ledgers` — default minimum ledgers before completion
+//! - `update_refund_window` — refund-request window in ledgers
+//! - `set_revocation_challenge_period` — challenge window for certificate revocations
+//! - `process_refund` — approve or reject a pending refund request; the
+//!   instructor share is debited from the lead instructor and every co-instructor
+//!   in the same proportions credited at enrollment
+//! - `resolve_arbitration` — resolve an open arbitration case for the student or
+//!   instructor
+//! - `set_fee_config` — per-token platform fee in basis points
+//! - `set_arbitration_fee_config` — arbitration fee per case
+//! - `set_risk_config_enabled` / `set_risk_fee_config` — risk-surcharge pricing
+//! - `mark_completed` — mark an enrollment complete; the student must also sign
+//!   when `evidence_hash` is `None` (blocked students cannot proceed)
+//! - `issue_certificate` — mint an on-chain certificate (blocked students cannot
+//!   proceed)
+//! - `revoke_certificate` — flag a certificate as revoked; revocation remains
+//!   challengeable until `revocation_deadline`
+//! - `bulk_revoke_course_certificates` — revoke every certificate of a course
+//! - `get_platform_fee` / `get_all_instructors` / `get_instructor_count` —
+//!   admin-only read queries
+//!
+//! ## Privileged Operations — Admin or Approver
+//! - `approve_course` — Pending → Active; high-value courses require two
+//!   different admins/approvers to sign separate calls
+//! - `reject_course` — Pending → Rejected
+//!
+//! ## Privileged Operations — Lead Instructor or Admin
+//! Each accepts a single `caller` that must be the course's lead instructor or
+//! the Admin, and must sign.
+//!
+//! - `set_enrollment_start_ledger` — optional ledger when enrollment opens
+//! - `pause_course` / `unpause_course` — pause or restore the course
+//! - `update_course` — update price and/or capacity
+//! - `clear_course_max_capacity` — remove the capacity cap
+//! - `set_enrollment_expiry` — optional per-enrollment expiry duration
+//! - `set_course_expiry` — optional course expiry ledger
+//! - `set_prerequisite_courses` — required prior course IDs
+//! - `update_content_hash` — update the off-chain content commitment
+//! - `set_max_certificates` — cap certificate issuance for the course
+//! - `set_co_instructors` — configure co-instructors and basis-point shares;
+//!   total shares cannot exceed 10 000 bps and the split is locked after the
+//!   first enrollment
+//!
+//! ## Privileged Operations — Instructor only
+//! - `register_course` — the instructor registers the course and must sign
+//! - `withdraw_earnings` — the instructor withdraws their own accumulated
+//!   earnings and must sign
+//!
+//! ## Privileged Operations — Multi-sig (Admin + Secondary Admin)
+//! Every entrypoint below requires `require_auth()` on, and the stored values
+//! of, both admins. Admin-expiry checks apply.
+//!
+//! - `withdraw_tokens` — emergency sweep of contract-held tokens
+//! - `archive_course` — permanent course removal; optionally refunds students
+//! - `transfer_admin` — proposes a new admin pair (they must call `accept_admin`)
+//! - `update_treasury` — schedules a new treasury address (takes effect after
+//!   100 ledgers)
+//! - `set_admin_expiry` — sets or clears the admin-role expiry ledger
+//! - `propose_upgrade` / `cancel_upgrade` / `upgrade_contract` /
+//!   `set_upgrade_timelock` — time-locked contract code upgrade; see
+//!   "Contract Upgrades" below
+//!
+//! ## Privileged Operations — Two-party or conditional signatures
+//! - `transfer_course` — the current lead instructor **and** the Admin must both
+//!   sign
+//! - `accept_admin` — the new Admin **and** new Secondary Admin must both sign
+//! - `get_enrollment` / `get_enrollment_history` / `get_certificate` — the
+//!   caller must sign and be the student, the course instructor, or the Admin
+//!
+//! ## Student Self-service Operations
+//! These are user-gated rather than admin-privileged; the student must sign.
+//!
+//! - `enroll` / `batch_enroll` / `re_enroll` — pay and enroll (blocked students
+//!   and frozen instructors are rejected)
+//! - `request_refund` — request a refund inside the configured window
+//! - `challenge_revocation` — challenge a pending certificate revocation
+//! - `escalate_to_arbitration` — open an arbitration case and pay its fee
+//! - `join_waitlist` / `leave_waitlist` — manage a capacity waitlist
 //!
 //! ## Student Blocking Policy
 //! - `block_student()` called by the admin prevents a student from:
@@ -346,6 +418,13 @@ pub struct Course {
     pub archived_at_ledger: Option<u32>,
     /// Category tags for the course (e.g. "programming", "design") (#165)
     pub categories: Vec<String>,
+    /// Co-instructors and their revenue shares in basis points.
+    /// Shares are taken from the instructor portion of each enrollment and
+    /// must total at most 10 000 bps; any remainder goes to the lead
+    /// instructor. Configured via `set_co_instructors()` and locked once the
+    /// course has received its first enrollment so the split cannot be
+    /// changed retroactively.
+    pub co_instructors: Vec<CoInstructor>,
 }
 
 /// An enrollment record — one per student per course
@@ -694,6 +773,10 @@ impl HamplardContract {
     const MAX_CATEGORIES: u32 = 10;
     /// Maximum length of a category name in characters (#165)
     const MAX_CATEGORY_LEN: u32 = 64;
+    /// Maximum number of co-instructors that can be attached to one course.
+    const MAX_CO_INSTRUCTORS: u32 = 10;
+    /// Revenue shares are expressed in basis points (100% = 10 000 bps).
+    const MAX_SHARE_BPS: u32 = 10_000;
 
     // ----------------------------------------------------------
     // INIT
@@ -1054,6 +1137,7 @@ impl HamplardContract {
             prerequisite_course_ids: Vec::new(&env),
             archived_at_ledger: None,
             categories,
+            co_instructors: Vec::new(&env),
         };
 
         env.storage()
@@ -1653,12 +1737,7 @@ impl HamplardContract {
                         }
 
                         if instructor_amount > 0 {
-                            Self::debit_instructor_earnings(
-                                &env,
-                                &course.instructor,
-                                &course.token,
-                                instructor_amount,
-                            );
+                            Self::debit_instructor_shares(&env, &course, instructor_amount);
                             token_client.transfer(
                                 &env.current_contract_address(),
                                 &student,
@@ -2145,6 +2224,109 @@ impl HamplardContract {
         );
     }
 
+    /// Configure the co-instructors of a course and their revenue shares.
+    ///
+    /// `co_instructor_addresses` and `co_instructor_shares_bps` must have the
+    /// same length. Shares are basis points of the instructor portion of each
+    /// enrollment and must total at most 10 000 bps; any remainder is paid to
+    /// the lead instructor. Once the course has received its first enrollment
+    /// the split is locked so it cannot be changed retroactively.
+    ///
+    /// # Arguments
+    /// - `caller`                    — course instructor or admin (must sign)
+    /// - `course_id`                 — the course to configure
+    /// - `co_instructor_addresses`   — co-instructor addresses
+    /// - `co_instructor_shares_bps`  — matching revenue shares in basis points
+    pub fn set_co_instructors(
+        env: Env,
+        caller: Address,
+        course_id: String,
+        co_instructor_addresses: Vec<Address>,
+        co_instructor_shares_bps: Vec<u32>,
+    ) {
+        caller.require_auth();
+
+        let mut course = Self::get_course_internal(&env, &course_id)
+            .unwrap_or_else(|| panic!("course not found"));
+
+        let is_admin = Self::is_admin(&env, &caller);
+        if !is_admin && caller != course.instructor {
+            panic!("unauthorized");
+        }
+
+        if !is_admin && Self::is_instructor_frozen_internal(&env, &course.instructor) {
+            panic!("instructor is frozen");
+        }
+
+        if course.status == CourseStatus::Archived {
+            panic!("cannot update archived course");
+        }
+
+        if course.total_enrollments > 0 {
+            panic!("co-instructors are locked after the first enrollment");
+        }
+
+        if co_instructor_addresses.len() != co_instructor_shares_bps.len() {
+            panic!("co-instructor addresses and shares must have the same length");
+        }
+
+        if co_instructor_addresses.len() > Self::MAX_CO_INSTRUCTORS {
+            panic!("too many co-instructors (maximum is 10)");
+        }
+
+        let mut co_instructors: Vec<CoInstructor> = Vec::new(&env);
+        let mut total_share_bps: u32 = 0;
+
+        for i in 0..co_instructor_addresses.len() {
+            let address = co_instructor_addresses.get(i).unwrap();
+            let share_bps = co_instructor_shares_bps.get(i).unwrap();
+
+            if share_bps > Self::MAX_SHARE_BPS {
+                panic!("co-instructor share cannot exceed 10000 bps");
+            }
+
+            if address == course.instructor {
+                panic!("lead instructor cannot be a co-instructor");
+            }
+
+            if address == env.current_contract_address() {
+                panic!("contract address cannot be a co-instructor");
+            }
+
+            for existing in co_instructors.iter() {
+                if existing.address == address {
+                    panic!("duplicate co-instructor address");
+                }
+            }
+
+            total_share_bps = total_share_bps
+                .checked_add(share_bps)
+                .unwrap_or_else(|| panic!("co-instructor share overflow"));
+
+            co_instructors.push_back(CoInstructor { address, share_bps });
+        }
+
+        if total_share_bps > Self::MAX_SHARE_BPS {
+            panic!("total co-instructor shares cannot exceed 10000 bps");
+        }
+
+        course.co_instructors = co_instructors.clone();
+        course.last_updated_ledger = env.ledger().sequence();
+        env.storage()
+            .persistent()
+            .set(&DataKey::Course(course_id.clone()), &course);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Course(course_id.clone()),
+            Self::PERSISTENT_TTL_THRESHOLD,
+            Self::PERSISTENT_TTL_EXTEND_TO,
+        );
+
+        env.events().publish(
+            (Symbol::new(&env, "co_instructors_set"), course_id.clone()),
+            (course_id, co_instructors, env.ledger().sequence()),
+        );
+    }
+
     // ----------------------------------------------------------
     // ENROLLMENT & PAYMENT
     // ----------------------------------------------------------
@@ -2572,25 +2754,24 @@ impl HamplardContract {
                 );
             }
 
-            // Credit instructor earnings — pull-based withdrawal model
+            // Credit instructor earnings — pull-based withdrawal model.
+            // Co-instructors receive their configured share first; the lead
+            // instructor receives the remainder.
             if instructor_amount > 0 {
-                Self::credit_instructor_earnings(
-                    env,
-                    &course.instructor,
-                    &course.token,
-                    instructor_amount,
-                );
-                env.events().publish(
-                    (
-                        Symbol::new(&env, "instructor_payment_transferred"),
-                        course_id.clone(),
-                    ),
-                    (
-                        course.instructor.clone(),
-                        instructor_amount,
-                        env.ledger().sequence(),
-                    ),
-                );
+                let lead_amount = Self::credit_instructor_shares(env, &course, instructor_amount);
+                if lead_amount > 0 {
+                    env.events().publish(
+                        (
+                            Symbol::new(&env, "instructor_payment_transferred"),
+                            course_id.clone(),
+                        ),
+                        (
+                            course.instructor.clone(),
+                            lead_amount,
+                            env.ledger().sequence(),
+                        ),
+                    );
+                }
             }
 
             actual_received
@@ -2811,23 +2992,20 @@ impl HamplardContract {
             }
 
             if instructor_amount > 0 {
-                Self::credit_instructor_earnings(
-                    env,
-                    &course.instructor,
-                    &course.token,
-                    instructor_amount,
-                );
-                env.events().publish(
-                    (
-                        Symbol::new(env, "instructor_payment_transferred"),
-                        course_id.clone(),
-                    ),
-                    (
-                        course.instructor.clone(),
-                        instructor_amount,
-                        env.ledger().sequence(),
-                    ),
-                );
+                let lead_amount = Self::credit_instructor_shares(env, &course, instructor_amount);
+                if lead_amount > 0 {
+                    env.events().publish(
+                        (
+                            Symbol::new(env, "instructor_payment_transferred"),
+                            course_id.clone(),
+                        ),
+                        (
+                            course.instructor.clone(),
+                            lead_amount,
+                            env.ledger().sequence(),
+                        ),
+                    );
+                }
             }
 
             actual_received
@@ -3057,12 +3235,7 @@ impl HamplardContract {
             }
 
             if instructor_amount > 0 {
-                Self::credit_instructor_earnings(
-                    &env,
-                    &course.instructor,
-                    &course.token,
-                    instructor_amount,
-                );
+                Self::credit_instructor_shares(&env, &course, instructor_amount);
             }
         }
 
@@ -4803,12 +4976,7 @@ impl HamplardContract {
             // Refund instructor share from contract-held earnings, again using the
             // proportional partial split when a refund amount is requested.
             if instructor_refund > 0 {
-                Self::debit_instructor_earnings(
-                    &env,
-                    &course.instructor,
-                    &course.token,
-                    instructor_refund,
-                );
+                Self::debit_instructor_shares(&env, &course, instructor_refund);
                 token_client.transfer(
                     &env.current_contract_address(),
                     &student,
@@ -5565,6 +5733,100 @@ impl HamplardContract {
         );
 
         enrollment_ref
+    }
+
+    /// Split `total_amount` across the course's co-instructors according to
+    /// their configured basis-point shares, then credit the remainder to the
+    /// lead instructor. Returns the amount credited to the lead instructor.
+    fn credit_instructor_shares(env: &Env, course: &Course, total_amount: i128) -> i128 {
+        if total_amount <= 0 {
+            return 0;
+        }
+
+        let mut distributed: i128 = 0;
+        for co_instructor in course.co_instructors.iter() {
+            if co_instructor.share_bps == 0 {
+                continue;
+            }
+
+            let share_amount = total_amount
+                .checked_mul(co_instructor.share_bps as i128)
+                .unwrap_or_else(|| panic!("overflow computing co-instructor share"))
+                / Self::MAX_SHARE_BPS as i128;
+
+            if share_amount > 0 {
+                Self::credit_instructor_earnings(
+                    env,
+                    &co_instructor.address,
+                    &course.token,
+                    share_amount,
+                );
+                distributed = distributed
+                    .checked_add(share_amount)
+                    .unwrap_or_else(|| panic!("co-instructor share total overflow"));
+
+                env.events().publish(
+                    (Symbol::new(env, "co_instructor_paid"), course.id.clone()),
+                    (
+                        co_instructor.address.clone(),
+                        share_amount,
+                        env.ledger().sequence(),
+                    ),
+                );
+            }
+        }
+
+        let lead_share = total_amount
+            .checked_sub(distributed)
+            .unwrap_or_else(|| panic!("co-instructor split underflow"));
+
+        if lead_share > 0 {
+            Self::credit_instructor_earnings(env, &course.instructor, &course.token, lead_share);
+        }
+
+        lead_share
+    }
+
+    /// Debit `total_amount` from the course's instructor split, taking each
+    /// co-instructor's pro-rata share first and the remainder from the lead
+    /// instructor. Used by refund paths so every recipient that was credited
+    /// at enrollment is debited by the same amount.
+    fn debit_instructor_shares(env: &Env, course: &Course, total_amount: i128) {
+        if total_amount <= 0 {
+            return;
+        }
+
+        let mut debited: i128 = 0;
+        for co_instructor in course.co_instructors.iter() {
+            if co_instructor.share_bps == 0 {
+                continue;
+            }
+
+            let share_amount = total_amount
+                .checked_mul(co_instructor.share_bps as i128)
+                .unwrap_or_else(|| panic!("overflow computing co-instructor refund share"))
+                / Self::MAX_SHARE_BPS as i128;
+
+            if share_amount > 0 {
+                Self::debit_instructor_earnings(
+                    env,
+                    &co_instructor.address,
+                    &course.token,
+                    share_amount,
+                );
+                debited = debited
+                    .checked_add(share_amount)
+                    .unwrap_or_else(|| panic!("co-instructor refund total overflow"));
+            }
+        }
+
+        let lead_share = total_amount
+            .checked_sub(debited)
+            .unwrap_or_else(|| panic!("co-instructor refund underflow"));
+
+        if lead_share > 0 {
+            Self::debit_instructor_earnings(env, &course.instructor, &course.token, lead_share);
+        }
     }
 
     fn credit_instructor_earnings(env: &Env, instructor: &Address, token: &Address, amount: i128) {

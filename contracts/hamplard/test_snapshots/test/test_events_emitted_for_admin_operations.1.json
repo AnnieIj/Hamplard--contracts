@@ -261,7 +261,7 @@
                   "string": "COURSE-ATTR-001"
                 },
                 {
-                  "string": "evidence"
+                  "bytes": "65766964656e6365000000000000000000000000000000000000000000000000"
                 }
               ]
             }
@@ -953,6 +953,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "co_instructors"
+                      },
+                      "val": {
+                        "vec": []
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "content_hash"
                       },
                       "val": {
@@ -1417,7 +1425,7 @@
                         "symbol": "evidence_hash"
                       },
                       "val": {
-                        "string": "evidence"
+                        "bytes": "65766964656e6365000000000000000000000000000000000000000000000000"
                       }
                     },
                     {

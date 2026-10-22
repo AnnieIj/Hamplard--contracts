@@ -310,7 +310,8 @@
                 },
                 {
                   "bool": true
-                }
+                },
+                "void"
               ]
             }
           },
@@ -484,6 +485,14 @@
                       },
                       "val": {
                         "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "co_instructors"
+                      },
+                      "val": {
+                        "vec": []
                       }
                     },
                     {
@@ -1214,6 +1223,17 @@
                       },
                       "val": {
                         "string": "COURSE-REFUND"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "refund_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000000000
+                        }
                       }
                     },
                     {
