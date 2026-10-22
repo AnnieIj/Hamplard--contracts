@@ -2009,7 +2009,7 @@ fn test_enroll_insufficient_funds_rollback() {
     assert_eq!(token_client.balance(&student), 150_000_000);
     assert_eq!(token_client.balance(&contract_id), 0);
     assert!(!client.is_enrolled(&student, &course_id));
->>>>>>> pr/559
+>>>>>>> pr/563
 }
 
 #[test]
@@ -2717,13 +2717,13 @@ fn test_old_admin_rejected_for_all_admin_only_functions_after_transfer() {
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
->>>>>>> pr/557
-=======
-        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 >>>>>>> pr/559
 =======
         client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
 >>>>>>> pr/562
+=======
+        client.process_refund(&admin, &refund_student, &refund_course_id, &true, &None);
+>>>>>>> pr/563
     }));
     assert!(res.is_err(), "old admin must be rejected by process_refund");
 
@@ -13888,4 +13888,139 @@ fn test_treasury_getters_before_and_after_delay() {
         .with_mut(|l| l.sequence_number = effective_ledger);
     assert_eq!(client.get_treasury(), new_treasury);
     assert_eq!(client.get_pending_treasury(), None);
+}
+
+
+// ============================================================
+// CPU / MEMORY BASELINE BENCHMARKS (#493)
+// ============================================================
+
+fn print_budget(env: &Env, label: &str) {
+    let budget = env.cost_estimate().budget();
+    std::println!(
+        "BENCH {} cpu_instructions={} memory_bytes={}",
+        label,
+        budget.cpu_instruction_cost(),
+        budget.memory_bytes_cost()
+    );
+}
+
+#[test]
+#[ignore = "benchmark; run with --ignored --nocapture"]
+fn benchmark_enroll_single_course() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "BENCH-ENROLL",
+        100_000_000,
+    );
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &1_000_000_000);
+
+    client.enroll(&student, &String::from_str(&env, "BENCH-ENROLL"));
+
+    print_budget(&env, "enroll");
+}
+
+#[test]
+#[ignore = "benchmark; run with --ignored --nocapture"]
+fn benchmark_batch_enroll_10_courses() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let mut course_ids = Vec::new(&env);
+    for i in 0..10u32 {
+        let course_id = std::format!("BENCH-BATCH-{:02}", i);
+        register_and_approve_course(
+            &env,
+            &client,
+            &token_id,
+            &admin,
+            &instructor,
+            &course_id,
+            100_000_000,
+        );
+        course_ids.push_back(String::from_str(&env, &course_id));
+    }
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &10_000_000_000);
+
+    client.batch_enroll(&student, &course_ids);
+
+    print_budget(&env, "batch_enroll_10");
+}
+
+#[test]
+#[ignore = "benchmark; run with --ignored --nocapture"]
+fn benchmark_archive_course_with_10_refunds() {
+    let (env, contract_id, token_id, admin, sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "BENCH-ARCHIVE",
+        100_000_000,
+    );
+    let course_id = String::from_str(&env, "BENCH-ARCHIVE");
+
+    let mut students = Vec::new(&env);
+    let asset_client = token::StellarAssetClient::new(&env, &token_id);
+    for _ in 0..10u32 {
+        let student = Address::generate(&env);
+        asset_client.mint(&student, &1_000_000_000);
+        client.enroll(&student, &course_id);
+        students.push_back(student);
+    }
+
+    client.pause_course(&admin, &course_id);
+    env.mock_all_auths_allowing_non_root_auth();
+    client.archive_course(&admin, &sec_admin, &course_id, &Some(students));
+
+    print_budget(&env, "archive_course_10_refunds");
+}
+
+#[test]
+#[ignore = "benchmark; run with --ignored --nocapture"]
+fn benchmark_register_course_against_50_course_catalog() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    client.update_max_courses_limit(&admin, &60u32);
+    for i in 0..50u32 {
+        let course_id = std::format!("BENCH-CATALOG-{:02}", i);
+        client.register_course(
+            &instructor,
+            &String::from_str(&env, &course_id),
+            &100_000_000,
+            &token_id,
+            &0u32,
+            &None,
+            &BytesN::from_array(&env, &[1u8; 32]),
+            &soroban_sdk::Vec::new(&env),
+        );
+    }
+
+    client.register_course(
+        &instructor,
+        &String::from_str(&env, "BENCH-CATALOG-50"),
+        &100_000_000,
+        &token_id,
+        &0u32,
+        &None,
+        &BytesN::from_array(&env, &[1u8; 32]),
+        &soroban_sdk::Vec::new(&env),
+    );
+
+    print_budget(&env, "register_course_catalog_50");
 }

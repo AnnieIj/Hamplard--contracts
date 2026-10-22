@@ -222,8 +222,13 @@
 extern crate std;
 
 use soroban_sdk::{
+<<<<<<< HEAD
     contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Map, String,
     Symbol, Vec,
+=======
+    contract, contractimpl, contracttype, token, Address, BytesN, Env, IntoVal, Map, String,
+    Symbol, Val, Vec,
+>>>>>>> pr/563
 };
 
 /// Stable contract error codes returned by every failure path.
@@ -1056,14 +1061,7 @@ impl HamplardContract {
 
         course.enrollment_start_ledger = enrollment_start_ledger;
         course.last_updated_ledger = env.ledger().sequence();
-        env.storage()
-            .persistent()
-            .set(&DataKey::Course(course_id.clone()), &course);
-        env.storage().persistent().extend_ttl(
-            &DataKey::Course(course_id.clone()),
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
         env.events().publish(
             (Symbol::new(&env, "enrollment_start_set"), course_id.clone()),
@@ -1286,24 +1284,12 @@ impl HamplardContract {
             co_instructors: Vec::new(&env),
         };
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::Course(course_id.clone()), &course);
+        Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
-        env.storage().persistent().extend_ttl(
-            &DataKey::Course(course_id.clone()),
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
-
-        env.storage().persistent().set(
+        Self::persist(
+            &env,
             &DataKey::CourseInstructorRef(course_id.clone()),
             &instructor,
-        );
-        env.storage().persistent().extend_ttl(
-            &DataKey::CourseInstructorRef(course_id.clone()),
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
         );
 
         // Append to on-chain course catalog
@@ -1313,14 +1299,7 @@ impl HamplardContract {
             .get(&DataKey::CourseList)
             .unwrap_or_else(|| Vec::new(&env));
         catalog.push_back(course_id.clone());
-        env.storage()
-            .persistent()
-            .set(&DataKey::CourseList, &catalog);
-        env.storage().persistent().extend_ttl(
-            &DataKey::CourseList,
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &DataKey::CourseList, &catalog);
 
         env.storage().instance().set(
             &DataKey::InstructorCourseCount(instructor.clone()),
@@ -1338,14 +1317,7 @@ impl HamplardContract {
             .get(&instructor_list_key)
             .unwrap_or_else(|| Vec::new(&env));
         instructor_courses.push_back(course_id.clone());
-        env.storage()
-            .persistent()
-            .set(&instructor_list_key, &instructor_courses);
-        env.storage().persistent().extend_ttl(
-            &instructor_list_key,
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &instructor_list_key, &instructor_courses);
 
         // Add instructor to global registry if first course
         let mut registry: Vec<Address> = env
@@ -1365,14 +1337,7 @@ impl HamplardContract {
 
         if !exists {
             registry.push_back(instructor.clone());
-            env.storage()
-                .persistent()
-                .set(&DataKey::InstructorRegistry, &registry);
-            env.storage().persistent().extend_ttl(
-                &DataKey::InstructorRegistry,
-                Self::PERSISTENT_TTL_THRESHOLD,
-                Self::PERSISTENT_TTL_EXTEND_TO,
-            );
+            Self::persist(&env, &DataKey::InstructorRegistry, &registry);
         }
 
         env.events().publish(
@@ -1470,14 +1435,7 @@ impl HamplardContract {
 
         course.status = CourseStatus::Active;
         course.last_updated_ledger = env.ledger().sequence();
-        env.storage()
-            .persistent()
-            .set(&DataKey::Course(course_id.clone()), &course);
-        env.storage().persistent().extend_ttl(
-            &DataKey::Course(course_id.clone()),
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
         let pending_key = DataKey::InstructorPendingCourseCount(course.instructor.clone());
         let pending_count: u32 = env.storage().instance().get(&pending_key).unwrap_or(0);
@@ -1538,14 +1496,7 @@ impl HamplardContract {
 
         course.status = CourseStatus::Rejected;
         course.last_updated_ledger = env.ledger().sequence();
-        env.storage()
-            .persistent()
-            .set(&DataKey::Course(course_id.clone()), &course);
-        env.storage().persistent().extend_ttl(
-            &DataKey::Course(course_id.clone()),
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
         env.events().publish(
             (Symbol::new(&env, "course_rejected"), course_id.clone()),
@@ -1585,14 +1536,7 @@ impl HamplardContract {
 
         course.status = CourseStatus::Paused;
         course.last_updated_ledger = env.ledger().sequence();
-        env.storage()
-            .persistent()
-            .set(&DataKey::Course(course_id.clone()), &course);
-        env.storage().persistent().extend_ttl(
-            &DataKey::Course(course_id.clone()),
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
         env.events().publish(
             (Symbol::new(&env, "course_paused"), course_id.clone()),
@@ -1635,14 +1579,7 @@ impl HamplardContract {
 
         course.status = CourseStatus::Active;
         course.last_updated_ledger = env.ledger().sequence();
-        env.storage()
-            .persistent()
-            .set(&DataKey::Course(course_id.clone()), &course);
-        env.storage().persistent().extend_ttl(
-            &DataKey::Course(course_id.clone()),
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
         env.events().publish(
             (Symbol::new(&env, "course_unpaused"), course_id.clone()),
@@ -1730,25 +1667,14 @@ impl HamplardContract {
 
         course.instructor = new_instructor.clone();
         course.last_updated_ledger = env.ledger().sequence();
-        env.storage()
-            .persistent()
-            .set(&DataKey::Course(course_id.clone()), &course);
-        env.storage().persistent().extend_ttl(
-            &DataKey::Course(course_id.clone()),
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
         // Keep CourseInstructorRef in sync so enroll() continues to succeed
         // after ownership changes. Enrollment records themselves are untouched.
-        env.storage().persistent().set(
+        Self::persist(
+            &env,
             &DataKey::CourseInstructorRef(course_id.clone()),
             &new_instructor,
-        );
-        env.storage().persistent().extend_ttl(
-            &DataKey::CourseInstructorRef(course_id.clone()),
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
         );
 
         let old_count_key = DataKey::InstructorCourseCount(previous_instructor.clone());
@@ -1791,14 +1717,7 @@ impl HamplardContract {
             .get(&new_list_key)
             .unwrap_or_else(|| Vec::new(&env));
         new_instructor_courses.push_back(course_id.clone());
-        env.storage()
-            .persistent()
-            .set(&new_list_key, &new_instructor_courses);
-        env.storage().persistent().extend_ttl(
-            &new_list_key,
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &new_list_key, &new_instructor_courses);
 
         env.events().publish(
             (Symbol::new(&env, "course_transferred"), course_id.clone()),
@@ -1894,9 +1813,48 @@ impl HamplardContract {
                     if !enrollment.completed && !enrollment.is_refunded {
                         let breakdown = Self::refund_enrollment(&env, &mut course, &student, None);
 
+<<<<<<< HEAD
                         refund_count = refund_count.checked_add(1).unwrap_or_else(|| {
                             soroban_sdk::panic_with_error!(&env, Error::ArithmeticOverflow)
                         });
+=======
+                        if platform_amount > 0 {
+                            token_client.transfer(&treasury, &student, &platform_amount);
+                        }
+
+                        if instructor_amount > 0 {
+                            Self::debit_instructor_earnings(
+                                &env,
+                                &course.instructor,
+                                &course.token,
+                                instructor_amount,
+                            );
+                            token_client.transfer(
+                                &env.current_contract_address(),
+                                &student,
+                                &instructor_amount,
+                            );
+                        }
+
+                        // Archive the refunded enrollment before removing the active record.
+                        let mut archived_enrollment: Enrollment = enrollment.clone();
+                        archived_enrollment.is_refunded = true;
+                        let history_key =
+                            DataKey::EnrollmentHistory(student.clone(), course_id.clone());
+                        let mut history: Vec<Enrollment> = env
+                            .storage()
+                            .persistent()
+                            .get(&history_key)
+                            .unwrap_or_else(|| Vec::new(&env));
+                        history.push_back(archived_enrollment);
+                        Self::persist(&env, &history_key, &history);
+
+                        env.storage().persistent().remove(&enrollment_key);
+
+                        refund_count = refund_count
+                            .checked_add(1)
+                            .unwrap_or_else(|| panic!("refund count overflow"));
+>>>>>>> pr/563
                         total_refunded = total_refunded
 <<<<<<< HEAD
                             .checked_add(breakdown.platform_refund + breakdown.instructor_refund)
@@ -1949,14 +1907,7 @@ impl HamplardContract {
         // If students remain enrolled, persist the decremented counts so
         // follow-up refund batches observe the updated course state.
         if course.active_enrollments > 0 {
-            env.storage()
-                .persistent()
-                .set(&DataKey::Course(course_id.clone()), &course);
-            env.storage().persistent().extend_ttl(
-                &DataKey::Course(course_id.clone()),
-                Self::PERSISTENT_TTL_THRESHOLD,
-                Self::PERSISTENT_TTL_EXTEND_TO,
-            );
+            Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
             return;
         }
 
@@ -1964,9 +1915,7 @@ impl HamplardContract {
         course.archived_at_ledger = Some(env.ledger().sequence());
         course.last_updated_ledger = env.ledger().sequence();
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::ArchivedCourse(course_id.clone()), &course);
+        Self::persist(&env, &DataKey::ArchivedCourse(course_id.clone()), &course);
 
         env.storage()
             .persistent()
@@ -2048,9 +1997,7 @@ impl HamplardContract {
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::ArithmeticOverflow));
         course.last_updated_ledger = env.ledger().sequence();
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::Course(course_id.clone()), &course);
+        Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
         env.events().publish(
             (Symbol::new(&env, "course_updated"), course_id.clone()),
@@ -2090,9 +2037,7 @@ impl HamplardContract {
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::ArithmeticOverflow));
         course.last_updated_ledger = env.ledger().sequence();
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::Course(course_id.clone()), &course);
+        Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
         env.events().publish(
             (Symbol::new(&env, "course_updated"), course_id.clone()),
@@ -2134,9 +2079,7 @@ impl HamplardContract {
 
         course.enrollment_expiry_ledgers = expiry_ledgers;
         course.last_updated_ledger = env.ledger().sequence();
-        env.storage()
-            .persistent()
-            .set(&DataKey::Course(course_id.clone()), &course);
+        Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
         env.events().publish(
             (
@@ -2183,14 +2126,7 @@ impl HamplardContract {
 
         course.expires_at_ledger = expires_at_ledger;
         course.last_updated_ledger = env.ledger().sequence();
-        env.storage()
-            .persistent()
-            .set(&DataKey::Course(course_id.clone()), &course);
-        env.storage().persistent().extend_ttl(
-            &DataKey::Course(course_id.clone()),
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
         env.events().publish(
             (Symbol::new(&env, "course_expiry_set"), course_id.clone()),
@@ -2252,14 +2188,7 @@ impl HamplardContract {
 
         course.prerequisite_course_ids = prerequisite_course_ids.clone();
         course.last_updated_ledger = env.ledger().sequence();
-        env.storage()
-            .persistent()
-            .set(&DataKey::Course(course_id.clone()), &course);
-        env.storage().persistent().extend_ttl(
-            &DataKey::Course(course_id.clone()),
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
         env.events().publish(
             (
@@ -2310,14 +2239,7 @@ impl HamplardContract {
 
         course.content_hash = content_hash.clone();
         course.last_updated_ledger = env.ledger().sequence();
-        env.storage()
-            .persistent()
-            .set(&DataKey::Course(course_id.clone()), &course);
-        env.storage().persistent().extend_ttl(
-            &DataKey::Course(course_id.clone()),
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
         env.events().publish(
             (Symbol::new(&env, "content_hash_updated"), course_id.clone()),
@@ -2373,14 +2295,7 @@ impl HamplardContract {
 
         course.max_certificates = max_certs;
         course.last_updated_ledger = env.ledger().sequence();
-        env.storage()
-            .persistent()
-            .set(&DataKey::Course(course_id.clone()), &course);
-        env.storage().persistent().extend_ttl(
-            &DataKey::Course(course_id.clone()),
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
         env.events().publish(
             (Symbol::new(&env, "max_certificates_set"), course_id.clone()),
@@ -2868,14 +2783,7 @@ impl HamplardContract {
         {
             course.status = CourseStatus::Paused;
             course.last_updated_ledger = env.ledger().sequence();
-            env.storage()
-                .persistent()
-                .set(&DataKey::Course(course_id.clone()), &course);
-            env.storage().persistent().extend_ttl(
-                &DataKey::Course(course_id.clone()),
-                Self::PERSISTENT_TTL_THRESHOLD,
-                Self::PERSISTENT_TTL_EXTEND_TO,
-            );
+            Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
             env.events().publish(
                 (
                     Symbol::new(env, "course_circuit_breaker_tripped"),
@@ -2968,6 +2876,7 @@ impl HamplardContract {
         // accumulates across failed calls to the same course.
         let new_failure_count = failure_count
             .checked_add(1)
+<<<<<<< HEAD
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::ArithmeticOverflow));
         env.storage()
             .persistent()
@@ -2977,6 +2886,10 @@ impl HamplardContract {
             Self::PERSISTENT_TTL_THRESHOLD,
             Self::PERSISTENT_TTL_EXTEND_TO,
         );
+=======
+            .unwrap_or_else(|| panic!("failure counter overflow"));
+        Self::persist(&env, &failure_key, &new_failure_count);
+>>>>>>> pr/563
 
         let actual_amount_paid = if course.price > 0 {
             // Verify actual transfer amount by checking balance before and after.
@@ -3043,12 +2956,7 @@ impl HamplardContract {
         // success, the course will have been paused by a prior invocation, so
         // this success can still proceed (the course status check in
         // validate_enrollment would have rejected it if it were Paused).
-        env.storage().persistent().set(&failure_key, &0u32);
-        env.storage().persistent().extend_ttl(
-            &failure_key,
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &failure_key, &0u32);
 
         // If the pre-incremented failure count hit the threshold (meaning this
         // successful call was preceded by CIRCUIT_BREAKER_THRESHOLD-1 failures),
@@ -3064,14 +2972,7 @@ impl HamplardContract {
         {
             course.status = CourseStatus::Paused;
             course.last_updated_ledger = env.ledger().sequence();
-            env.storage()
-                .persistent()
-                .set(&DataKey::Course(course_id.clone()), &course);
-            env.storage().persistent().extend_ttl(
-                &DataKey::Course(course_id.clone()),
-                Self::PERSISTENT_TTL_THRESHOLD,
-                Self::PERSISTENT_TTL_EXTEND_TO,
-            );
+            Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
             env.events().publish(
                 (
                     Symbol::new(&env, "course_circuit_breaker_tripped"),
@@ -3104,15 +3005,10 @@ impl HamplardContract {
             completed_at_ledger: None,
         };
 
-        env.storage().persistent().set(
+        Self::persist(
+            &env,
             &DataKey::Enrollment(student.clone(), course_id.clone()),
             &enrollment,
-        );
-
-        env.storage().persistent().extend_ttl(
-            &DataKey::Enrollment(student.clone(), course_id.clone()),
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
         );
 
         // Update course stats
@@ -3129,9 +3025,7 @@ impl HamplardContract {
             .checked_add(course.price)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::ArithmeticOverflow));
         course.last_updated_ledger = env.ledger().sequence();
-        env.storage()
-            .persistent()
-            .set(&DataKey::Course(course_id.clone()), &course);
+        Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
         // Increment platform-wide active enrollment counter
 <<<<<<< HEAD
@@ -3293,15 +3187,10 @@ impl HamplardContract {
             completed_at_ledger: None,
         };
 
-        env.storage().persistent().set(
+        Self::persist(
+            &env,
             &DataKey::Enrollment(student.clone(), course_id.clone()),
             &enrollment,
-        );
-
-        env.storage().persistent().extend_ttl(
-            &DataKey::Enrollment(student.clone(), course_id.clone()),
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
         );
 
         course.total_enrollments = course
@@ -3317,9 +3206,7 @@ impl HamplardContract {
             .checked_add(course.price)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::ArithmeticOverflow));
         course.last_updated_ledger = env.ledger().sequence();
-        env.storage()
-            .persistent()
-            .set(&DataKey::Course(course_id.clone()), &course);
+        Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
 <<<<<<< HEAD
         let total_active: u32 = Self::read_total_active_enrollments(env);
@@ -3522,6 +3409,7 @@ impl HamplardContract {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                 panic!("token transfer amount mismatch");
 =======
 >>>>>>> pr/557
@@ -3529,6 +3417,8 @@ impl HamplardContract {
 >>>>>>> pr/559
 =======
 >>>>>>> pr/562
+=======
+>>>>>>> pr/563
                 return;
             }
 
@@ -3550,12 +3440,7 @@ impl HamplardContract {
             .get(&history_key)
             .unwrap_or_else(|| Vec::new(&env));
         history.push_back(previous_enrollment);
-        env.storage().persistent().set(&history_key, &history);
-        env.storage().persistent().extend_ttl(
-            &history_key,
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &history_key, &history);
 
         let new_enrollment_ref = Self::generate_enrollment_ref(&env, &student, &course_id);
         let new_enrollment = Enrollment {
@@ -3575,14 +3460,7 @@ impl HamplardContract {
             completed_at_ledger: None,
         };
 
-        env.storage()
-            .persistent()
-            .set(&enrollment_key, &new_enrollment);
-        env.storage().persistent().extend_ttl(
-            &enrollment_key,
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &enrollment_key, &new_enrollment);
 
         course.total_enrollments = course
             .total_enrollments
@@ -3597,9 +3475,7 @@ impl HamplardContract {
             .checked_add(course.price)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::ArithmeticOverflow));
         course.last_updated_ledger = env.ledger().sequence();
-        env.storage()
-            .persistent()
-            .set(&DataKey::Course(course_id.clone()), &course);
+        Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
         // Increment platform-wide active enrollment counter
 <<<<<<< HEAD
@@ -3681,7 +3557,7 @@ impl HamplardContract {
         if new_balance == 0 {
             env.storage().persistent().remove(&earnings_key);
         } else {
-            env.storage().persistent().set(&earnings_key, &new_balance);
+            Self::persist(&env, &earnings_key, &new_balance);
         }
 
         // Decrement total outstanding instructor earnings for this token
@@ -3862,14 +3738,10 @@ impl HamplardContract {
         enrollment.evidence_hash = evidence_hash;
         enrollment.completed_at_ledger = Some(env.ledger().sequence()); // Issue 166
 
-        env.storage().persistent().set(
+        Self::persist(
+            &env,
             &DataKey::Enrollment(student.clone(), course_id.clone()),
             &enrollment,
-        );
-        env.storage().persistent().extend_ttl(
-            &DataKey::Enrollment(student.clone(), course_id.clone()),
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
         );
 
         // Update active enrollments count on course
@@ -3878,14 +3750,7 @@ impl HamplardContract {
         if course.active_enrollments > 0 {
             course.active_enrollments -= 1;
             course.last_updated_ledger = env.ledger().sequence();
-            env.storage()
-                .persistent()
-                .set(&DataKey::Course(course_id.clone()), &course);
-            env.storage().persistent().extend_ttl(
-                &DataKey::Course(course_id.clone()),
-                Self::PERSISTENT_TTL_THRESHOLD,
-                Self::PERSISTENT_TTL_EXTEND_TO,
-            );
+            Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
         }
 
         // Decrement platform-wide active enrollment counter
@@ -4027,27 +3892,19 @@ impl HamplardContract {
             revocation_deadline: None,
         };
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::Certificate(certificate_id.clone()), &certificate);
-
-        env.storage().persistent().extend_ttl(
+        Self::persist(
+            &env,
             &DataKey::Certificate(certificate_id.clone()),
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
+            &certificate,
         );
 
         // Mark enrollment as certificate issued
         enrollment.certificate_issued = true;
         enrollment.certificate_id = Some(certificate_id.clone());
-        env.storage().persistent().set(
+        Self::persist(
+            &env,
             &DataKey::Enrollment(student.clone(), course_id.clone()),
             &enrollment,
-        );
-        env.storage().persistent().extend_ttl(
-            &DataKey::Enrollment(student.clone(), course_id.clone()),
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
         );
 
         // Increment certificate count for course
@@ -4056,9 +3913,7 @@ impl HamplardContract {
             .checked_add(1)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::ArithmeticOverflow));
         course.last_updated_ledger = env.ledger().sequence();
-        env.storage()
-            .persistent()
-            .set(&DataKey::Course(course_id.clone()), &course);
+        Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
         // Index the certificate under its course so course-wide bulk
         // operations (bulk_revoke_course_certificates) can enumerate every
@@ -4070,14 +3925,7 @@ impl HamplardContract {
             .get(&course_certs_key)
             .unwrap_or_else(|| Vec::new(&env));
         course_certs.push_back(certificate_id.clone());
-        env.storage()
-            .persistent()
-            .set(&course_certs_key, &course_certs);
-        env.storage().persistent().extend_ttl(
-            &course_certs_key,
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &course_certs_key, &course_certs);
 
         Self::update_instructor_stats(&env, &certificate.instructor, |s| {
             s.total_certificates = s
@@ -4253,7 +4101,7 @@ impl HamplardContract {
         cert.revocation_reason = Some(reason.clone());
         cert.revocation_deadline = Some(deadline);
 
-        env.storage().persistent().set(&certificate_key, &cert);
+        Self::persist(&env, &certificate_key, &cert);
 
         env.events().publish(
             (
@@ -4321,9 +4169,7 @@ impl HamplardContract {
         cert.revocation_reason = None;
         cert.revocation_deadline = None;
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::Certificate(certificate_id.clone()), &cert);
+        Self::persist(&env, &DataKey::Certificate(certificate_id.clone()), &cert);
 
         env.events().publish(
             (
@@ -4850,14 +4696,7 @@ impl HamplardContract {
                     if course.status == CourseStatus::Active {
                         course.status = CourseStatus::Paused;
                         course.last_updated_ledger = env.ledger().sequence();
-                        env.storage()
-                            .persistent()
-                            .set(&DataKey::Course(course_id.clone()), &course);
-                        env.storage().persistent().extend_ttl(
-                            &DataKey::Course(course_id.clone()),
-                            Self::PERSISTENT_TTL_THRESHOLD,
-                            Self::PERSISTENT_TTL_EXTEND_TO,
-                        );
+                        Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
                         env.events().publish(
                             (Symbol::new(&env, "course_paused"), course_id.clone()),
@@ -5123,6 +4962,7 @@ impl HamplardContract {
         env.storage()
             .instance()
             .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
+
         env.storage()
             .instance()
             .set(&DataKey::DefaultMinCompletionLedgers, &ledgers);
@@ -5246,12 +5086,7 @@ impl HamplardContract {
             refund_amount: None,
         };
 
-        env.storage().persistent().set(&key, &request);
-        env.storage().persistent().extend_ttl(
-            &key,
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &key, &request);
 
         env.events().publish(
             (Symbol::new(&env, "refund_requested"), course_id.clone()),
@@ -5384,12 +5219,7 @@ impl HamplardContract {
                 .get(&history_key)
                 .unwrap_or_else(|| Vec::new(&env));
             history.push_back(enrollment.clone());
-            env.storage().persistent().set(&history_key, &history);
-            env.storage().persistent().extend_ttl(
-                &history_key,
-                Self::PERSISTENT_TTL_THRESHOLD,
-                Self::PERSISTENT_TTL_EXTEND_TO,
-            );
+            Self::persist(&env, &history_key, &history);
             env.storage().persistent().remove(&enrollment_key);
 
             // Decrement active enrollments
@@ -5399,9 +5229,7 @@ impl HamplardContract {
 >>>>>>> pr/556
 
             course.last_updated_ledger = env.ledger().sequence();
-            env.storage()
-                .persistent()
-                .set(&DataKey::Course(course_id.clone()), &course);
+            Self::persist(&env, &DataKey::Course(course_id.clone()), &course);
 
 <<<<<<< HEAD
 =======
@@ -5428,7 +5256,7 @@ impl HamplardContract {
             request.refund_amount = None;
         }
 
-        env.storage().persistent().set(&key, &request);
+        Self::persist(&env, &key, &request);
 
         env.events().publish(
             (Symbol::new(&env, "refund_processed"), course_id.clone()),
@@ -5795,38 +5623,17 @@ impl HamplardContract {
             .has(&DataKey::Enrollment(student, course_id))
     }
 
-    /// Check whether a student has completed a course
     /// Check whether a student has completed a course.
     ///
     /// Returns:
     /// - `None`        — student has no enrollment record for this course
-    /// - `Some(false)` — enrolled but not yet completed (or enrollment has expired)
+    /// - `Some(false)` — enrolled but not yet completed
     /// - `Some(true)`  — enrollment exists and is marked completed
     pub fn has_completed(env: Env, student: Address, course_id: String) -> Option<bool> {
-        if let Some(enrollment) = env
-            .storage()
+        env.storage()
             .persistent()
-            .get::<DataKey, Enrollment>(&DataKey::Enrollment(student, course_id.clone()))
-        {
-            if enrollment.completed {
-                return Some(true);
-            }
-            // Not yet completed — check if the enrollment window has expired
-            if let Some(course) = Self::get_course_internal(&env, &course_id) {
-                if let Some(expiry_ledgers) = course.enrollment_expiry_ledgers {
-                    let expiry_at = enrollment
-                        .enrolled_at_ledger
-                        .checked_add(expiry_ledgers)
-                        .unwrap_or(u32::MAX);
-                    if env.ledger().sequence() >= expiry_at {
-                        return Some(false); // Expired — treat as inactive
-                    }
-                }
-            }
-            Some(false)
-        } else {
-            None
-        }
+            .get::<DataKey, Enrollment>(&DataKey::Enrollment(student, course_id))
+            .map(|enrollment| enrollment.completed)
     }
 
     /// Verify a certificate — returns true if it exists, has not been
@@ -5911,6 +5718,7 @@ impl HamplardContract {
     // ----------------------------------------------------------
 
 <<<<<<< HEAD
+<<<<<<< HEAD
     /// Resolve the effective treasury address, promoting a matured
     /// `PendingTreasury` update if its `effective_ledger` has been reached.
     ///
@@ -5961,6 +5769,23 @@ impl HamplardContract {
             ),
         );
 >>>>>>> pr/559
+=======
+    /// Persist a value and extend its TTL in one step.
+    ///
+    /// Every persistent write must go through this helper so a key can never
+    /// be written without also renewing its TTL.
+    fn persist<K, V>(env: &Env, key: &K, value: &V)
+    where
+        K: IntoVal<Env, Val>,
+        V: IntoVal<Env, Val>,
+    {
+        env.storage().persistent().set(key, value);
+        env.storage().persistent().extend_ttl(
+            key,
+            Self::PERSISTENT_TTL_THRESHOLD,
+            Self::PERSISTENT_TTL_EXTEND_TO,
+        );
+>>>>>>> pr/563
     }
 
     fn get_course_internal(env: &Env, course_id: &String) -> Option<Course> {
@@ -6051,6 +5876,7 @@ impl HamplardContract {
         let key = DataKey::StudentEnrollmentCount(student.clone());
         let count = Self::get_student_enrollment_count_internal(env, student)
             .checked_add(1)
+<<<<<<< HEAD
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::ArithmeticOverflow));
         env.storage().persistent().set(&key, &count);
         env.storage().persistent().extend_ttl(
@@ -6058,6 +5884,10 @@ impl HamplardContract {
             Self::PERSISTENT_TTL_THRESHOLD,
             Self::PERSISTENT_TTL_EXTEND_TO,
         );
+=======
+            .unwrap_or_else(|| panic!("student enrollment count overflow"));
+        Self::persist(&env, &key, &count);
+>>>>>>> pr/563
     }
 
     fn is_btc_eth_token_internal(env: &Env, token: &Address) -> bool {
@@ -6204,14 +6034,10 @@ impl HamplardContract {
         let enrollment_ref = Self::counter_to_string(env, counter);
 
         // Store the mapping
-        env.storage().persistent().set(
+        Self::persist(
+            &env,
             &DataKey::EnrollmentByRef(enrollment_ref.clone()),
             &(student.clone(), course_id.clone()),
-        );
-        env.storage().persistent().extend_ttl(
-            &DataKey::EnrollmentByRef(enrollment_ref.clone()),
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
         );
 
         enrollment_ref
@@ -6316,6 +6142,7 @@ impl HamplardContract {
         let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
         let new_balance = current
             .checked_add(amount)
+<<<<<<< HEAD
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::ArithmeticOverflow));
         env.storage().persistent().set(&key, &new_balance);
         env.storage().persistent().extend_ttl(
@@ -6323,11 +6150,16 @@ impl HamplardContract {
             Self::PERSISTENT_TTL_THRESHOLD,
             Self::PERSISTENT_TTL_EXTEND_TO,
         );
+=======
+            .unwrap_or_else(|| panic!("overflow computing instructor earnings"));
+        Self::persist(&env, &key, &new_balance);
+>>>>>>> pr/563
         // Also update the per-instructor total earnings accumulator
         let total_key = DataKey::InstructorTotalEarnings(instructor.clone());
         let current_total: i128 = env.storage().persistent().get(&total_key).unwrap_or(0);
         let new_total = current_total
             .checked_add(amount)
+<<<<<<< HEAD
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::ArithmeticOverflow));
         env.storage().persistent().set(&total_key, &new_total);
         env.storage().persistent().extend_ttl(
@@ -6345,6 +6177,10 @@ impl HamplardContract {
         env.storage()
             .instance()
             .set(&outstanding_key, &new_outstanding);
+=======
+            .unwrap_or_else(|| panic!("overflow computing instructor total earnings"));
+        Self::persist(&env, &total_key, &new_total);
+>>>>>>> pr/563
     }
 
     fn debit_instructor_earnings(env: &Env, instructor: &Address, token: &Address, amount: i128) {
@@ -6357,7 +6193,7 @@ impl HamplardContract {
         if new_balance == 0 {
             env.storage().persistent().remove(&key);
         } else {
-            env.storage().persistent().set(&key, &new_balance);
+            Self::persist(&env, &key, &new_balance);
         }
         // Also decrement the per-instructor total earnings accumulator
         let total_key = DataKey::InstructorTotalEarnings(instructor.clone());
@@ -6369,7 +6205,7 @@ impl HamplardContract {
         if new_total == 0 {
             env.storage().persistent().remove(&total_key);
         } else {
-            env.storage().persistent().set(&total_key, &new_total);
+            Self::persist(&env, &total_key, &new_total);
         }
 
         // Decrement total outstanding instructor earnings for this token
@@ -6515,12 +6351,7 @@ impl HamplardContract {
                     total_certificates: 0,
                 });
         f(&mut stats);
-        env.storage().persistent().set(&key, &stats);
-        env.storage().persistent().extend_ttl(
-            &key,
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &key, &stats);
     }
 
     // ============================================================
@@ -6973,12 +6804,7 @@ impl HamplardContract {
             status: DisputeStatus::Open,
         };
 
-        env.storage().persistent().set(&case_key, &record);
-        env.storage().persistent().extend_ttl(
-            &case_key,
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &case_key, &record);
 
         // Track total outstanding arbitration fees for this token
         let arb_key = DataKey2::TotalArbitrationFees(course.token.clone());
@@ -7064,12 +6890,7 @@ impl HamplardContract {
             case.status = DisputeStatus::ResolvedForInstructor;
         }
 
-        env.storage().persistent().set(&case_key, &case);
-        env.storage().persistent().extend_ttl(
-            &case_key,
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &case_key, &case);
 
         // Decrement total outstanding arbitration fees for this token
         let arb_key = DataKey2::TotalArbitrationFees(case.token.clone());
@@ -7181,12 +7002,7 @@ impl HamplardContract {
         }
 
         waitlist.push_back(student.clone());
-        env.storage().persistent().set(&waitlist_key, &waitlist);
-        env.storage().persistent().extend_ttl(
-            &waitlist_key,
-            Self::PERSISTENT_TTL_THRESHOLD,
-            Self::PERSISTENT_TTL_EXTEND_TO,
-        );
+        Self::persist(&env, &waitlist_key, &waitlist);
 
         env.events().publish(
             (Symbol::new(&env, "waitlist_joined"), course_id.clone()),
@@ -7230,12 +7046,7 @@ impl HamplardContract {
         }
 
         if new_waitlist.len() > 0 {
-            env.storage().persistent().set(&waitlist_key, &new_waitlist);
-            env.storage().persistent().extend_ttl(
-                &waitlist_key,
-                Self::PERSISTENT_TTL_THRESHOLD,
-                Self::PERSISTENT_TTL_EXTEND_TO,
-            );
+            Self::persist(&env, &waitlist_key, &new_waitlist);
         } else {
             env.storage().persistent().remove(&waitlist_key);
         }
@@ -7275,12 +7086,7 @@ impl HamplardContract {
                 }
 
                 if new_waitlist.len() > 0 {
-                    env.storage().persistent().set(&waitlist_key, &new_waitlist);
-                    env.storage().persistent().extend_ttl(
-                        &waitlist_key,
-                        Self::PERSISTENT_TTL_THRESHOLD,
-                        Self::PERSISTENT_TTL_EXTEND_TO,
-                    );
+                    Self::persist(&env, &waitlist_key, &new_waitlist);
                 } else {
                     env.storage().persistent().remove(&waitlist_key);
                 }

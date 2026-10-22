@@ -3,6 +3,7 @@
 ## Unreleased
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 ### Storage layout change
 
 - `Course` gains two fields, `total_refunded: i128` and `refund_count: u32`, updated by both refund paths (`process_refund` and `archive_course`) so admins can read per-course refund rates on-chain via `get_course`. `Course` is a `#[contracttype]` struct, so courses stored before this change lack the new keys and will not deserialize against the new type; redeploy fresh, or migrate existing `Course` / `ArchivedCourse` entries before upgrading a live contract.
@@ -11,6 +12,17 @@
 
 - `get_treasury()` returns the effective platform treasury and `get_pending_treasury()` returns the scheduled treasury update that has not yet taken effect, so clients no longer need to read raw storage.
 >>>>>>> pr/562
+=======
+### Added
+- CPU and memory benchmark baselines for enrollment, batch enrollment, archiving with refunds, and large-catalog registration in `docs/BENCHMARKS.md`.
+
+### Changed
+- All persistent writes now go through a shared `persist()` helper that sets the value and renews its TTL together.
+- `has_completed()` now reads the enrollment's `completed` flag directly; the unreachable expiry branch and duplicated doc comment were removed.
+
+### Removed
+- Stale root `TODO.md` checklist.
+>>>>>>> pr/563
 
 ### Breaking change
 
