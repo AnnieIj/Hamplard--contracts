@@ -8350,11 +8350,25 @@ impl HamplardContract {
             soroban_sdk::panic_with_error!(&env, Error::InvalidFeeConfig);
         }
 
+<<<<<<< HEAD
         let old_fee_bps: Option<u32> = env
             .storage()
             .instance()
             .get::<DataKey, FeeConfig>(&DataKey::FeeConfig(token.clone()))
             .map(|c| c.fee_bps);
+=======
+        // Reject tokens that are not on the approved list — a per-token fee
+        // override for an unapproved token would be dead configuration that
+        // is easy to mistake for a live one.
+        if !env
+            .storage()
+            .persistent()
+            .has(&DataKey::ApprovedToken(token.clone()))
+        {
+            panic!("token is not approved");
+        }
+
+>>>>>>> pr/609
         let config = FeeConfig { fee_bps };
         env.storage()
             .instance()
