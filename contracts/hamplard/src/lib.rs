@@ -9,6 +9,7 @@
 //!
 //! ## Trust Hierarchy
 //!
+<<<<<<< HEAD
 //! | Role              | Who                        | Capabilities                                                                 |
 //! |-------------------|----------------------------|------------------------------------------------------------------------------|
 //! | Admin             | `DataKey::Admin`           | Single-admin operations below; co-signs every multi-sig operation            |
@@ -18,6 +19,16 @@
 //! | Co-instructor     | `Course::co_instructors`   | Passive revenue share; no privileged entrypoint is callable by this role     |
 //! | Student           | Any caller                 | Enroll, request refunds, challenge revocations, escalate disputes, waitlist  |
 //! | Treasury          | `DataKey::Treasury`        | Passive recipient of the platform fee share; cannot initiate any action      |
+=======
+//! | Role              | Who                    | Capabilities                                                          |
+//! |-------------------|------------------------|-----------------------------------------------------------------------|
+//! | Admin             | `DataKey::Admin`       | Fund-moving & config operations, archive courses, issue & revoke certificates, multi-sig co-approval |
+//! | Moderator         | `DataKey::Moderator`   | Approve/reject/pause courses, block/unblock students, mark completions |
+//! | Secondary Admin   | `DataKey::SecondaryAdmin` | Required alongside Admin for multi-sig operations (archive, treasury update, admin transfer) |
+//! | Instructor        | Course `instructor` field | Register courses, pause/unpause own courses, withdraw earnings, transfer course (with admin co-approval) |
+//! | Student           | Any caller             | Enroll in active courses (must sign), batch-enroll (unless blocked by admin)  |
+//! | Treasury          | `DataKey::Treasury`    | Passive recipient of platform fee share; cannot initiate any action   |
+>>>>>>> pr/610
 //!
 <<<<<<< HEAD
 //! ## Privileged Operations — Admin (single signature)
@@ -27,7 +38,7 @@
 //! ## Privileged Operations (single admin)
 //! - `approve_course` — moves a course from Pending to Active
 //! - `transfer_course` — co-approves an instructor-initiated course ownership transfer
-//! - `mark_completed` — marks a student enrollment as completed (blocked students cannot proceed)
+//! - `mark_completed` — marks a student enrollment as completed (blocked students cannot proceed) — moderator or admin
 //! - `issue_certificate` — mints an on-chain certificate of completion (blocked students cannot proceed)
 //! - `revoke_certificate` — flags a certificate as revoked (remains on-chain for audit)
 //! - `process_refund` — approves a pending refund; if the enrollment already has a
@@ -38,6 +49,7 @@
 //! - `pause_platform` / `unpause_platform` — halts or restores all enrollments
 //! - `add_approved_token` / `remove_approved_token` — controls which token contracts are accepted
 //! - `update_default_fee` / `update_max_courses_limit` — updates global parameters
+<<<<<<< HEAD
 //! - `set_platform_enrollment_cap` — sets the maximum number of concurrent active
 //!   enrollments. The new cap must be greater than or equal to the current
 //!   `TotalActiveEnrollments`; values below the current total are rejected with
@@ -45,6 +57,9 @@
 //!   enrollment. On success the new cap is emitted alongside the current total
 //!   via the `platform_enrollment_cap_set` event for off-chain visibility.
 //! - `block_student` / `unblock_student` — bans or unbans a student from the platform
+=======
+//! - `block_student` / `unblock_student` — bans or unbans a student from the platform — moderator or admin
+>>>>>>> pr/610
 //! - `get_platform_fee` — retrieves platform fee configuration (admin only)
 //! - `get_treasury` / `get_pending_treasury` — public views of the effective treasury and any scheduled update
 //! - `update_content_hash` — updates the content commitment hash for a course (admin or instructor)
@@ -160,6 +175,15 @@
 //! - `propose_upgrade` / `upgrade_contract` / `cancel_upgrade` — time-locked contract code
 //!   upgrade; see "Contract Upgrades" below
 >>>>>>> pr/596
+//!
+//! ## Moderator Role
+//! - `set_moderator` — sets the moderator address (admin only)
+//! - The moderator may perform day-to-day moderation: `approve_course`,
+//!   `reject_course`, `pause_course`, `block_student`, `unblock_student`,
+//!   and `mark_completed`.
+//! - The moderator may NOT move funds (`withdraw_tokens`, `process_refund`,
+//!   `archive_course`) or change configuration (`update_default_fee`,
+//!   `set_fee_config`, `add_approved_token`, `transfer_admin`, etc.).
 //!
 //! ## Student Blocking Policy
 //! - `block_student()` called by the admin prevents a student from:
@@ -965,6 +989,8 @@ pub enum DataKey {
     Certificate(String),
     /// Admin address — set at init, can approve courses and issue certificates
     Admin,
+    /// Moderator address — set by admin, can perform day-to-day moderation
+    Moderator,
     /// Secondary admin address for multi-sig operations
     SecondaryAdmin,
     /// Optional ledger sequence when the admin role expires
@@ -1374,6 +1400,7 @@ impl HamplardContract {
             .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
 
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Moderator, &admin);
         env.storage()
             .instance()
             .set(&DataKey::SecondaryAdmin, &secondary_admin);
@@ -1410,6 +1437,41 @@ impl HamplardContract {
                 refund_window_ledgers,
             ),
         );
+    }
+
+    /// Admin sets (or rotates) the moderator address.
+    ///
+    /// The moderator is a hot key permitted to perform day-to-day moderation
+    /// (approve/reject/pause courses, block/unblock students, mark completions)
+    /// without holding the admin key that can move funds or change config.
+    ///
+    /// # Arguments
+    /// - `admin`     — current admin (must sign)
+    /// - `moderator` — new moderator address
+    pub fn set_moderator(env: Env, admin: Address, moderator: Address) {
+        admin.require_auth();
+        Self::require_admin(&env, &admin, "set_moderator");
+        env.storage()
+            .instance()
+            .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
+
+        if moderator == env.current_contract_address() {
+            panic!("moderator cannot be the contract address");
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Moderator, &moderator);
+
+        env.events().publish(
+            (Symbol::new(&env, "moderator_set"), admin.clone()),
+            moderator,
+        );
+    }
+
+    /// Returns the current moderator address, if one has been configured.
+    pub fn get_moderator(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Moderator)
     }
 
     /// Instructor or admin configures an optional ledger sequence when enrollment opens.
@@ -1784,7 +1846,7 @@ impl HamplardContract {
     /// - `course_id` — the course to approve
     pub fn approve_course(env: Env, caller: Address, course_id: String) {
         caller.require_auth();
-        Self::require_admin_or_approver(&env, &caller, "approve_course");
+        Self::require_moderator_or_admin(&env, &caller, "approve_course");
         env.storage()
             .instance()
             .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
@@ -1922,7 +1984,7 @@ impl HamplardContract {
 
     pub fn reject_course(env: Env, caller: Address, course_id: String, reason: String) {
         caller.require_auth();
-        Self::require_admin_or_approver(&env, &caller, "reject_course");
+        Self::require_moderator_or_admin(&env, &caller, "reject_course");
         env.storage()
             .instance()
             .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
@@ -1976,8 +2038,13 @@ impl HamplardContract {
         let is_admin = Self::is_admin(&env, &caller);
         let is_instructor = caller == course.instructor;
 
+<<<<<<< HEAD
         if !is_admin && !is_instructor {
             soroban_sdk::panic_with_error!(&env, Error::Unauthorized);
+=======
+        if !is_admin && !is_instructor && !Self::is_moderator(&env, &caller) {
+            panic!("unauthorized");
+>>>>>>> pr/610
         }
 =======
         Self::require_admin_or_instructor(&env, &caller, &course);
@@ -2025,12 +2092,18 @@ impl HamplardContract {
         let is_admin = Self::is_admin(&env, &caller);
         let is_instructor = caller == course.instructor;
 
+<<<<<<< HEAD
         if !is_admin && !is_instructor {
             soroban_sdk::panic_with_error!(&env, Error::Unauthorized);
+=======
+        if !is_admin && !is_instructor && !Self::is_moderator(&env, &caller) {
+            panic!("unauthorized");
+>>>>>>> pr/610
         }
 
         // freeze_instructor() auto-pauses the instructor's courses; a frozen
         // instructor must not be able to undo that by unpausing them.
+<<<<<<< HEAD
         if !is_admin && Self::is_instructor_frozen_internal(&env, &course.instructor) {
             soroban_sdk::panic_with_error!(&env, Error::InstructorFrozen);
 =======
@@ -2039,6 +2112,9 @@ impl HamplardContract {
         // freeze_instructor() auto-pauses the instructor's courses; a frozen
         // instructor must not be able to undo that by unpausing them.
         if !Self::is_admin(&env, &caller) && Self::is_instructor_frozen_internal(&env, &course.instructor) {
+=======
+        if !is_admin && !Self::is_moderator(&env, &caller) && Self::is_instructor_frozen_internal(&env, &course.instructor) {
+>>>>>>> pr/610
             panic!("instructor is frozen");
 >>>>>>> pr/570
         }
