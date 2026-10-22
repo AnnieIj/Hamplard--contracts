@@ -1779,6 +1779,13 @@ impl HamplardContract {
         let mut total_refunded = 0i128;
 
         if let Some(ref students) = students_to_refund {
+<<<<<<< HEAD
+=======
+            let token_client = token::Client::new(&env, &course.token);
+
+            let treasury = Self::effective_treasury(&env);
+
+>>>>>>> pr/556
             for student in students.iter() {
                 let enrollment_key = DataKey::Enrollment(student.clone(), course_id.clone());
                 if env.storage().persistent().has(&enrollment_key) {
@@ -2745,23 +2752,7 @@ impl HamplardContract {
         );
 
         // Fetch treasury, applying any pending treasury update if effective
-        let mut treasury: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Treasury)
-            .unwrap_or_else(|| panic!("treasury not set"));
-
-        if let Some(pending) = env
-            .storage()
-            .instance()
-            .get::<DataKey, TreasuryUpdate>(&DataKey::PendingTreasury)
-        {
-            if env.ledger().sequence() >= pending.effective_ledger {
-                treasury = pending.address.clone();
-                env.storage().instance().set(&DataKey::Treasury, &treasury);
-                env.storage().instance().remove(&DataKey::PendingTreasury);
-            }
-        }
+        let treasury = Self::effective_treasury(env);
 
         // Transfer full price from student to contract, then distribute platform fee.
         //
@@ -3018,23 +3009,7 @@ impl HamplardContract {
             false,
         );
 
-        let mut treasury: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Treasury)
-            .unwrap_or_else(|| panic!("treasury not set"));
-
-        if let Some(pending) = env
-            .storage()
-            .instance()
-            .get::<DataKey, TreasuryUpdate>(&DataKey::PendingTreasury)
-        {
-            if env.ledger().sequence() >= pending.effective_ledger {
-                treasury = pending.address.clone();
-                env.storage().instance().set(&DataKey::Treasury, &treasury);
-                env.storage().instance().remove(&DataKey::PendingTreasury);
-            }
-        }
+        let treasury = Self::effective_treasury(env);
 
         let actual_amount_paid = if course.price > 0 {
             let balance_before = token_client.balance(&env.current_contract_address());
@@ -3277,23 +3252,7 @@ impl HamplardContract {
             is_btc_eth,
         );
 
-        let mut treasury: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Treasury)
-            .unwrap_or_else(|| panic!("treasury not set"));
-
-        if let Some(pending) = env
-            .storage()
-            .instance()
-            .get::<DataKey, TreasuryUpdate>(&DataKey::PendingTreasury)
-        {
-            if env.ledger().sequence() >= pending.effective_ledger {
-                treasury = pending.address.clone();
-                env.storage().instance().set(&DataKey::Treasury, &treasury);
-                env.storage().instance().remove(&DataKey::PendingTreasury);
-            }
-        }
+        let treasury = Self::effective_treasury(&env);
 
         if course.price > 0 {
             let balance_before = token_client.balance(&env.current_contract_address());
@@ -5025,6 +4984,7 @@ impl HamplardContract {
                 .unwrap_or_else(|| panic!("course not found"));
             let breakdown = Self::refund_enrollment(&env, &mut course, &student, refund_amount);
 
+<<<<<<< HEAD
             // Record the refund in the course's cumulative stats. Partial
             // refunds add only the amount actually paid back.
             course.refund_count = course
@@ -5035,6 +4995,83 @@ impl HamplardContract {
                 .total_refunded
                 .checked_add(breakdown.refund_amount)
                 .unwrap_or_else(|| panic!("course total_refunded overflow"));
+=======
+            // Use the split actually applied at enroll()/re_enroll() time
+            // (persisted on the enrollment record) rather than recomputing
+            // it from course.platform_fee_percent, which is never consulted
+            // at enrollment and may have since diverged from the FeeConfig
+            // (and any risk surcharge) that deduct_fee() actually applied.
+            let platform_amount = enrollment.platform_amount;
+            let instructor_amount = enrollment.instructor_amount;
+            let actual_refund_amount = match refund_amount {
+                Some(amount) => {
+                    if amount < 0 || amount > enrollment.amount_paid {
+                        panic!("refund amount must be <= amount_paid");
+                    }
+                    amount
+                }
+                None => enrollment.amount_paid,
+            };
+            let platform_refund = if enrollment.amount_paid == 0 {
+                0
+            } else {
+                actual_refund_amount
+                    .checked_mul(platform_amount)
+                    .map(|v| v / enrollment.amount_paid)
+                    .unwrap_or_else(|| panic!("overflow computing platform refund"))
+            };
+            let instructor_refund = actual_refund_amount
+                .checked_sub(platform_refund)
+                .unwrap_or_else(|| panic!("refund split underflow"));
+
+            let token_client = token::Client::new(&env, &course.token);
+            let treasury = Self::effective_treasury(&env);
+
+            // Refund platform fee from treasury, proportional to the request when
+            // a partial amount is specified.
+            if platform_refund > 0 {
+                token_client.transfer(&treasury, &student, &platform_refund);
+            }
+
+            // Refund instructor share from contract-held earnings, again using the
+            // proportional partial split when a refund amount is requested.
+            if instructor_refund > 0 {
+                Self::debit_instructor_earnings(
+                    &env,
+                    &course.instructor,
+                    &course.token,
+                    instructor_refund,
+                );
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &student,
+                    &instructor_refund,
+                );
+            }
+
+            // Archive the refunded enrollment to EnrollmentHistory before
+            // removing the active record, so the refund is auditable on-chain.
+            enrollment.is_refunded = true;
+            let history_key = DataKey::EnrollmentHistory(student.clone(), course_id.clone());
+            let mut history: Vec<Enrollment> = env
+                .storage()
+                .persistent()
+                .get(&history_key)
+                .unwrap_or_else(|| Vec::new(&env));
+            history.push_back(enrollment.clone());
+            env.storage().persistent().set(&history_key, &history);
+            env.storage().persistent().extend_ttl(
+                &history_key,
+                Self::PERSISTENT_TTL_THRESHOLD,
+                Self::PERSISTENT_TTL_EXTEND_TO,
+            );
+            env.storage().persistent().remove(&enrollment_key);
+
+            // Decrement active enrollments
+            if course.active_enrollments > 0 {
+                course.active_enrollments -= 1;
+            }
+>>>>>>> pr/556
 
             course.last_updated_ledger = env.ledger().sequence();
             env.storage()
@@ -5529,6 +5566,35 @@ impl HamplardContract {
     // ----------------------------------------------------------
     // INTERNAL HELPERS
     // ----------------------------------------------------------
+
+    /// Resolve the effective treasury address, promoting a matured
+    /// `PendingTreasury` update if its `effective_ledger` has been reached.
+    ///
+    /// When a pending update matures it is committed to `DataKey::Treasury`
+    /// and `DataKey::PendingTreasury` is cleared so subsequent calls in the
+    /// same transaction (and all future calls) see the new address without
+    /// re-reading the pending record.
+    fn effective_treasury(env: &Env) -> Address {
+        let mut treasury: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Treasury)
+            .unwrap_or_else(|| panic!("treasury not set"));
+
+        if let Some(pending) = env
+            .storage()
+            .instance()
+            .get::<DataKey, TreasuryUpdate>(&DataKey::PendingTreasury)
+        {
+            if env.ledger().sequence() >= pending.effective_ledger {
+                treasury = pending.address.clone();
+                env.storage().instance().set(&DataKey::Treasury, &treasury);
+                env.storage().instance().remove(&DataKey::PendingTreasury);
+            }
+        }
+
+        treasury
+    }
 
     fn get_course_internal(env: &Env, course_id: &String) -> Option<Course> {
         if let Some(course) = env
