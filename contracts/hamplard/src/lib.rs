@@ -1,6 +1,10 @@
+<<<<<<< HEAD
 //! Contract version and source metadata are exposed via `contractmeta!`
 //! (readable with `stellar contract info meta`) and the `version()` entrypoint.
 //!
+=======
+#![allow(clippy::too_many_arguments)]
+>>>>>>> pr/571
 //! # Hamplard Contract — Security Model
 //!
 //! ## Trust Hierarchy
@@ -1075,8 +1079,13 @@ impl HamplardContract {
         for byte in id_bytes.iter() {
             // Allow printable ASCII: space (0x20) through tilde (0x7E)
             // Exclude null (0x00) and other control chars (0x01-0x1F, 0x7F)
+<<<<<<< HEAD
             if *byte < 0x20 || *byte > 0x7E {
                 soroban_sdk::panic_with_error!(&env, Error::InvalidCourseInput);
+=======
+            if !(0x20..=0x7E).contains(byte) {
+                panic!("course_id contains invalid characters (must be printable ASCII)");
+>>>>>>> pr/571
             }
         }
 
@@ -1167,7 +1176,7 @@ impl HamplardContract {
             // Snapshot of the live token rate, rounded up to whole percent.
             // Informational only — with no override, enrollment always
             // follows the live FeeConfig(token) / DefaultFee.
-            (token_fee_bps + 99) / 100
+            token_fee_bps.div_ceil(100)
         } else {
             if platform_fee_pct > 100 {
                 soroban_sdk::panic_with_error!(&env, Error::InvalidFeeConfig);
@@ -7059,8 +7068,18 @@ impl HamplardContract {
             }
         }
 
+<<<<<<< HEAD
         if new_waitlist.len() > 0 {
             Self::persist(&env, &waitlist_key, &new_waitlist);
+=======
+        if !new_waitlist.is_empty() {
+            env.storage().persistent().set(&waitlist_key, &new_waitlist);
+            env.storage().persistent().extend_ttl(
+                &waitlist_key,
+                Self::PERSISTENT_TTL_THRESHOLD,
+                Self::PERSISTENT_TTL_EXTEND_TO,
+            );
+>>>>>>> pr/571
         } else {
             env.storage().persistent().remove(&waitlist_key);
         }
@@ -7089,8 +7108,13 @@ impl HamplardContract {
         let waitlist_key = DataKey::CourseWaitlist(course_id.clone());
         let waitlist: Option<Vec<Address>> = env.storage().persistent().get(&waitlist_key);
 
+<<<<<<< HEAD
         if let Some(list) = waitlist {
             if list.len() > 0 {
+=======
+        if let Some(mut list) = waitlist {
+            if !list.is_empty() {
+>>>>>>> pr/571
                 let next_student = list.get(0).unwrap();
 
                 // Remove from waitlist
@@ -7099,8 +7123,18 @@ impl HamplardContract {
                     new_waitlist.push_back(list.get(i).unwrap());
                 }
 
+<<<<<<< HEAD
                 if new_waitlist.len() > 0 {
                     Self::persist(&env, &waitlist_key, &new_waitlist);
+=======
+                if !new_waitlist.is_empty() {
+                    env.storage().persistent().set(&waitlist_key, &new_waitlist);
+                    env.storage().persistent().extend_ttl(
+                        &waitlist_key,
+                        Self::PERSISTENT_TTL_THRESHOLD,
+                        Self::PERSISTENT_TTL_EXTEND_TO,
+                    );
+>>>>>>> pr/571
                 } else {
                     env.storage().persistent().remove(&waitlist_key);
                 }
