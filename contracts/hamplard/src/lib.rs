@@ -3294,6 +3294,26 @@ impl HamplardContract {
 
 
     fn validate_enrollment(env: &Env, student: &Address, course_id: &String) {
+        let course =
+            Self::get_course_internal(env, course_id).unwrap_or_else(|| panic!("course not found"));
+        Self::validate_enrollment_for(env, student, course_id, &course, true);
+    }
+
+    /// The shared enrollment guard chain.
+    ///
+    /// `enroll()` and `re_enroll()` both run it, so the two paid entry points
+    /// can never drift apart again: every guard added here is enforced by both.
+    ///
+    /// `require_not_enrolled` is the only genuine difference between them — a
+    /// first enrollment must not find an existing record, while a re-enrollment
+    /// requires one and therefore skips that single check.
+    fn validate_enrollment_for(
+        env: &Env,
+        student: &Address,
+        course_id: &String,
+        course: &Course,
+        require_not_enrolled: bool,
+    ) {
         if env
             .storage()
             .instance()
@@ -3308,9 +3328,12 @@ impl HamplardContract {
 >>>>>>> pr/557
         }
 
+<<<<<<< HEAD
         let course = Self::get_course_internal(env, course_id)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::CourseNotFound));
 
+=======
+>>>>>>> pr/614
         if Self::is_student_blocked_internal(env, student) {
 <<<<<<< HEAD
             Self::emit_enrollment_failed(env, student, course_id, "STUDENT_BLOCKED");
@@ -3400,10 +3423,11 @@ impl HamplardContract {
             }
         }
 
-        if env
-            .storage()
-            .persistent()
-            .has(&DataKey::Enrollment(student.clone(), course_id.clone()))
+        if require_not_enrolled
+            && env
+                .storage()
+                .persistent()
+                .has(&DataKey::Enrollment(student.clone(), course_id.clone()))
         {
 <<<<<<< HEAD
             Self::emit_enrollment_failed(env, student, course_id, "ALREADY_ENROLLED");
@@ -4162,6 +4186,7 @@ impl HamplardContract {
     pub fn re_enroll(env: Env, student: Address, course_id: String, max_price: i128) {
         student.require_auth();
 
+<<<<<<< HEAD
         if env
             .storage()
             .instance()
@@ -4171,6 +4196,8 @@ impl HamplardContract {
             soroban_sdk::panic_with_error!(&env, Error::PlatformPaused);
         }
 
+=======
+>>>>>>> pr/614
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| soroban_sdk::panic_with_error!(&env, Error::CourseNotFound));
 
@@ -4179,6 +4206,7 @@ impl HamplardContract {
         // the current price exceeds the student's stated maximum.
         Self::assert_price_within_limit(course.price, max_price);
 
+<<<<<<< HEAD
         if Self::is_student_blocked_internal(&env, &student) {
             soroban_sdk::panic_with_error!(&env, Error::StudentBlocked);
         }
@@ -4223,6 +4251,15 @@ impl HamplardContract {
         {
             soroban_sdk::panic_with_error!(&env, Error::CourseNotAvailable);
         }
+=======
+        // A re-enrollment is a paid enrollment, so it has to clear exactly the
+        // same guards as a first one: paused platform, blocked student, frozen
+        // instructor, admin/contract/self-enrollment, course status and
+        // schedule, approved token and token precision, prerequisites, course
+        // capacity and the platform-wide cap. The only guard skipped is
+        // "already enrolled", because a re-enrollment requires the prior record.
+        Self::validate_enrollment_for(&env, &student, &course_id, &course, false);
+>>>>>>> pr/614
 
         let enrollment_key = DataKey::Enrollment(student.clone(), course_id.clone());
         let previous_enrollment: Enrollment = env
@@ -4242,6 +4279,7 @@ impl HamplardContract {
 >>>>>>> pr/577
         }
 
+<<<<<<< HEAD
         if let Some(cap) = course.max_capacity {
 <<<<<<< HEAD
             let count = match course.capacity_mode {
@@ -4262,6 +4300,8 @@ impl HamplardContract {
                 soroban_sdk::panic_with_error!(&env, Error::CourseNotAvailable);
             }
         }
+=======
+>>>>>>> pr/614
 
         let token_client = token::Client::new(&env, &course.token);
 
