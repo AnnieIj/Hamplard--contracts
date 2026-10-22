@@ -614,11 +614,16 @@ stellar contract invoke \
 
 ## Security Considerations
 
-- **Authorization**: Every write function calls `require_auth()` on the relevant party. Instructors cannot approve their own courses. Students cannot issue their own certificates. Only the admin can revoke certificates.
+- **Authorization**: Every write function calls `require_auth()` on the relevant party. Instructors cannot approve their own courses. Students cannot issue their own certificates. Only admins can revoke certificates.
+- **Dual-admin model**: The contract is initialised with two distinct admin addresses — `admin` and `secondary_admin` — so there is no single-address point of failure. Sensitive operations require **both** admin signatures (`require_multi_admin`): `archive_course`, `withdraw_tokens`, `update_treasury`, `transfer_admin`, `set_admin_expiry`, and the contract upgrade functions (`propose_upgrade`, `cancel_upgrade`, `upgrade_contract`, `set_upgrade_timelock`). Routine operations (approving courses, issuing certificates, fee configuration) need only one admin.
+- **Two-step admin transfer with cooldown**: `transfer_admin(admin1, admin2, new_admin, new_secondary_admin)` only *proposes* the new pair; the new admins must call `accept_admin` to complete the rotation. A minimum cooldown between consecutive transfers prevents rapid re-rotation during incident response. `init` also enforces that admin, secondary admin, and treasury are all distinct addresses.
+- **Admin expiry**: `set_admin_expiry(admin1, admin2, expires_at)` sets a ledger sequence after which every admin operation panics with "admin role has expired" — a dead-man's switch that can be read via `get_admin_expiry()` and cleared by passing `None`.
+- **Scoped approvers**: Admins can delegate course moderation via `add_approver` / `remove_approver`. Approvers may approve and reject courses, but have no access to treasury, fee, or admin-transfer functions — and unlike the admin role, approver authority does not expire.
+- **Instructor freezes**: `freeze_instructor` blocks an instructor and automatically pauses all of their Active courses; `unfreeze_instructor` reverses it. Frozen instructors cannot operate while the platform keeps student funds safe.
+- **Student blocklist**: `block_student` bans an address from enrolling in any course; `unblock_student` lifts the ban.
 - **No double enrollment**: The contract checks for an existing enrollment record before processing payment. A student cannot be charged twice for the same course.
 - **Atomic payment split**: Both the platform and instructor transfers happen in the same transaction. There is no intermediate escrow that could be exploited.
-- **Certificate immutability**: Revoked certificates are flagged — not deleted. This preserves the audit trail and prevents a revocation from being hidden.
-- **Admin is a single address**: For production, consider using a multi-sig wallet as the admin address to avoid a single point of failure.
+- **Certificate immutability**: Revoked certificates are flagged — not deleted. This preserves the audit trail and prevents a revocation from being hidden. Revocation is permanent only after the challenge period elapses.
 - **Fee validation**: Platform fee percentage is validated to be ≤ 100 at both `init` and `register_course` time.
 
 ---
