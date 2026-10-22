@@ -7645,6 +7645,9 @@ impl HamplardContract {
         token: Address,
         payment_amount: i128,
     ) -> RiskFeeApplied {
+        if payment_amount < 0 {
+            panic!("payment_amount cannot be negative");
+        }
         let (is_new_customer, is_btc_eth) = Self::resolve_risk_flags(&env, &student, &token);
         Self::compute_fee_breakdown(&env, &token, payment_amount, is_new_customer, is_btc_eth)
     }
