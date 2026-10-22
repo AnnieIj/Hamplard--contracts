@@ -4865,6 +4865,169 @@ fn test_has_completed_distinguishes_absent_enrollment_from_incomplete() {
     assert_eq!(client.has_completed(&student, &course_id), Some(true));
 }
 
+// ============================================================
+// #352 — re_enroll() MUST CLEAR THE SAME GUARDS AS enroll()
+// ============================================================
+
+/// A re-enrollment is a paid enrollment, so the platform-wide cap has to apply
+/// to it exactly as it does to a first enrollment. Before re_enroll() shared
+/// the enrollment guard chain it silently let a full platform take more money.
+#[test]
+#[should_panic(expected = "platform has reached maximum total enrollment capacity")]
+fn test_re_enroll_rejected_when_platform_enrollment_cap_reached() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+
+    let course_id = String::from_str(&env, "COURSE-REENROLL-CAP");
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-REENROLL-CAP",
+        100_000_000,
+    );
+
+    client.enroll(&student, &course_id);
+    client.mark_completed(
+        &admin,
+        &student,
+        &course_id,
+        &Some(evidence_hash(&env, "cap")),
+    );
+
+    // Completing released the only active slot, so the cap is hit again as soon
+    // as it is set to zero — the platform accepts no further enrollments of any
+    // kind, and a re-enrollment is an enrollment.
+    client.set_platform_enrollment_cap(&admin, &Some(0u32));
+
+    client.re_enroll(&student, &course_id);
+}
+
+/// The prerequisite guard has to be re-evaluated on a re-enrollment: revoking
+/// the prerequisite certificate after the first run must block a new one.
+#[test]
+#[should_panic(expected = "prerequisite course not completed")]
+fn test_re_enroll_revalidates_prerequisite_certificate() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+
+    let prereq_id = String::from_str(&env, "COURSE-RE-PREREQ");
+    let advanced_id = String::from_str(&env, "COURSE-RE-ADVANCED");
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-RE-PREREQ",
+        100_000_000,
+    );
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-RE-ADVANCED",
+        100_000_000,
+    );
+
+    let mut prereqs = soroban_sdk::Vec::new(&env);
+    prereqs.push_back(prereq_id.clone());
+    client.set_prerequisite_courses(&instructor, &advanced_id, &prereqs);
+
+    // Complete the prerequisite and earn its certificate.
+    client.enroll(&student, &prereq_id);
+    client.mark_completed(
+        &admin,
+        &student,
+        &prereq_id,
+        &Some(evidence_hash(&env, "prereq")),
+    );
+    client.issue_certificate(
+        &admin,
+        &student,
+        &prereq_id,
+        &String::from_str(&env, "CERT-RE-PREREQ"),
+        &String::from_str(&env, "Prerequisite"),
+        &get_enrollment_ref(&env, &client, &student, "COURSE-RE-PREREQ"),
+        &None,
+        &None,
+    );
+
+    // The student is then allowed into the advanced course and finishes it.
+    client.enroll(&student, &advanced_id);
+    client.mark_completed(
+        &admin,
+        &student,
+        &advanced_id,
+        &Some(evidence_hash(&env, "advanced")),
+    );
+
+    // The prerequisite certificate is revoked, so the prerequisite is no longer
+    // satisfied.
+    client.revoke_certificate(
+        &admin,
+        &String::from_str(&env, "CERT-RE-PREREQ"),
+        &String::from_str(&env, "revoked for the regression test"),
+    );
+
+    client.re_enroll(&student, &advanced_id);
+}
+
+/// The happy path must keep working: with every guard satisfied, a completed
+/// student can still re-enroll and is charged again.
+#[test]
+fn test_re_enroll_still_succeeds_when_guards_pass() {
+    let (env, contract_id, token_id, admin, _sec_admin, treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &token_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+
+    let course_id = String::from_str(&env, "COURSE-RE-HAPPY");
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-RE-HAPPY",
+        200_000_000,
+    );
+
+    client.enroll(&student, &course_id);
+    client.mark_completed(
+        &admin,
+        &student,
+        &course_id,
+        &Some(evidence_hash(&env, "happy")),
+    );
+
+    let treasury_before = token_client.balance(&treasury);
+    client.re_enroll(&student, &course_id);
+
+    assert_eq!(
+        token_client.balance(&treasury) - treasury_before,
+        40_000_000,
+        "a re-enrollment is charged the same 20% platform fee"
+    );
+    let enrollment = client.get_enrollment(&student, &student, &course_id).unwrap();
+    assert!(!enrollment.completed, "a fresh enrollment cycle starts");
+    let course = client.get_course(&course_id).unwrap();
+    assert_eq!(course.total_enrollments, 2);
+}
+
 #[test]
 fn test_re_enroll_after_completion_succeeds() {
     let (env, contract_id, token_id, admin, _sec_admin, treasury, instructor) = setup();

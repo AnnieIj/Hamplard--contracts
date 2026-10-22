@@ -2233,6 +2233,26 @@ impl HamplardContract {
     }
 
     fn validate_enrollment(env: &Env, student: &Address, course_id: &String) {
+        let course =
+            Self::get_course_internal(env, course_id).unwrap_or_else(|| panic!("course not found"));
+        Self::validate_enrollment_for(env, student, course_id, &course, true);
+    }
+
+    /// The shared enrollment guard chain.
+    ///
+    /// `enroll()` and `re_enroll()` both run it, so the two paid entry points
+    /// can never drift apart again: every guard added here is enforced by both.
+    ///
+    /// `require_not_enrolled` is the only genuine difference between them — a
+    /// first enrollment must not find an existing record, while a re-enrollment
+    /// requires one and therefore skips that single check.
+    fn validate_enrollment_for(
+        env: &Env,
+        student: &Address,
+        course_id: &String,
+        course: &Course,
+        require_not_enrolled: bool,
+    ) {
         if env
             .storage()
             .instance()
@@ -2241,9 +2261,6 @@ impl HamplardContract {
         {
             panic!("platform is paused");
         }
-
-        let course =
-            Self::get_course_internal(env, course_id).unwrap_or_else(|| panic!("course not found"));
 
         if Self::is_student_blocked_internal(env, student) {
             panic!("student is blocked");
@@ -2302,10 +2319,11 @@ impl HamplardContract {
             }
         }
 
-        if env
-            .storage()
-            .persistent()
-            .has(&DataKey::Enrollment(student.clone(), course_id.clone()))
+        if require_not_enrolled
+            && env
+                .storage()
+                .persistent()
+                .has(&DataKey::Enrollment(student.clone(), course_id.clone()))
         {
             panic!("already enrolled in this course");
         }
@@ -2911,47 +2929,16 @@ impl HamplardContract {
     pub fn re_enroll(env: Env, student: Address, course_id: String) {
         student.require_auth();
 
-        if env
-            .storage()
-            .instance()
-            .get(&DataKey::PlatformPaused)
-            .unwrap_or(false)
-        {
-            panic!("platform is paused");
-        }
-
         let mut course = Self::get_course_internal(&env, &course_id)
             .unwrap_or_else(|| panic!("course not found"));
 
-        if Self::is_student_blocked_internal(&env, &student) {
-            panic!("student is blocked");
-        }
-
-        if Self::is_instructor_frozen_internal(&env, &course.instructor) {
-            panic!("instructor is frozen");
-        }
-
-        if student == course.instructor {
-            panic!("instructor cannot enroll in own course");
-        }
-
-        if course.status != CourseStatus::Active {
-            panic!("course is not available for enrollment");
-        }
-
-        if let Some(start) = course.enrollment_start_ledger {
-            if env.ledger().sequence() < start {
-                panic!("enrollment has not started for this course");
-            }
-        }
-
-        if !env
-            .storage()
-            .instance()
-            .has(&DataKey::ApprovedToken(course.token.clone()))
-        {
-            panic!("course token is not approved");
-        }
+        // A re-enrollment is a paid enrollment, so it has to clear exactly the
+        // same guards as a first one: paused platform, blocked student, frozen
+        // instructor, admin/contract/self-enrollment, course status and
+        // schedule, approved token and token precision, prerequisites, course
+        // capacity and the platform-wide cap. The only guard skipped is
+        // "already enrolled", because a re-enrollment requires the prior record.
+        Self::validate_enrollment_for(&env, &student, &course_id, &course, false);
 
         let enrollment_key = DataKey::Enrollment(student.clone(), course_id.clone());
         let previous_enrollment: Enrollment = env
@@ -2964,17 +2951,6 @@ impl HamplardContract {
             panic!("current enrollment has not been completed yet");
         }
 
-        if let Some(cap) = course.max_capacity {
-            if course.total_enrollments >= cap {
-                panic!("course has reached maximum enrollment capacity");
-            }
-        }
-
-        if let Some(expiry) = course.expires_at_ledger {
-            if env.ledger().sequence() >= expiry {
-                panic!("course has expired");
-            }
-        }
 
         let token_client = token::Client::new(&env, &course.token);
 
