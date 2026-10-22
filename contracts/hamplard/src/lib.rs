@@ -348,6 +348,23 @@ pub enum CourseStatus {
     Rejected,
 }
 
+/// Controls how `max_capacity` is enforced for a course.
+///
+/// - `Lifetime`   — the default; `max_capacity` caps the all-time total number
+///   of enrollments (existing behaviour, including completed and refunded seats).
+/// - `Concurrent` — `max_capacity` caps the number of *active* (i.e. enrolled
+///   but not yet completed or refunded) seats at any one time.  A seat is freed
+///   when `mark_completed()` or a refund path decrements `active_enrollments`,
+///   allowing a new student to take that seat.
+#[contracttype]
+#[derive(Clone, PartialEq, Debug)]
+pub enum CapacityMode {
+    /// Cap total lifetime enrollments (default).
+    Lifetime,
+    /// Cap concurrent active seats — seats freed on completion or refund.
+    Concurrent,
+}
+
 /// A course listing stored on-chain
 /// Full content (videos, materials, descriptions) lives off-chain in the backend.
 /// The contract stores only what is needed to enforce payments and certificates.
@@ -395,6 +412,10 @@ pub struct Course {
     /// Ledger sequence when the course was registered
     pub created_at_ledger: u32,
     pub max_capacity: Option<u32>,
+    /// Whether `max_capacity` is enforced as a lifetime total or a concurrent
+    /// active-seat cap. Defaults to `CapacityMode::Lifetime` so existing
+    /// behaviour is unchanged when `capacity_mode` is not explicitly set.
+    pub capacity_mode: CapacityMode,
     /// Optional ledger sequence before which new enrollments are rejected.
     /// Allows instructors/admins to create a grace period after approval before
     /// student intake begins.
@@ -1154,6 +1175,7 @@ impl HamplardContract {
             status: CourseStatus::Pending,
             created_at_ledger: env.ledger().sequence(),
             max_capacity,
+            capacity_mode: CapacityMode::Lifetime,
             enrollment_start_ledger: None,
             enrollment_expiry_ledgers: None,
             min_completion_ledgers,
@@ -1833,6 +1855,7 @@ impl HamplardContract {
         course_id: String,
         new_price: Option<i128>,
         new_max_capacity: Option<Option<u32>>,
+        new_capacity_mode: Option<CapacityMode>,
     ) -> u32 {
         caller.require_auth();
 
@@ -1875,6 +1898,11 @@ impl HamplardContract {
                 panic!("max_capacity must be greater than zero (use None for unlimited)");
             }
             course.max_capacity = capacity;
+            modified = true;
+        }
+
+        if let Some(mode) = new_capacity_mode {
+            course.capacity_mode = mode;
             modified = true;
         }
 
@@ -2526,7 +2554,11 @@ impl HamplardContract {
             panic!("already enrolled in this course");
         }
         if let Some(cap) = course.max_capacity {
-            if course.total_enrollments >= cap {
+            let count = match course.capacity_mode {
+                CapacityMode::Lifetime => course.total_enrollments,
+                CapacityMode::Concurrent => course.active_enrollments,
+            };
+            if count >= cap {
                 Self::emit_enrollment_failed(env, student, course_id, "CAPACITY_EXCEEDED");
                 panic!("course has reached maximum enrollment capacity");
             }
@@ -3213,7 +3245,11 @@ impl HamplardContract {
         }
 
         if let Some(cap) = course.max_capacity {
-            if course.total_enrollments >= cap {
+            let count = match course.capacity_mode {
+                CapacityMode::Lifetime => course.total_enrollments,
+                CapacityMode::Concurrent => course.active_enrollments,
+            };
+            if count >= cap {
                 panic!("course has reached maximum enrollment capacity");
             }
         }
