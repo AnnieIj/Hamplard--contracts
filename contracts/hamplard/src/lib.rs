@@ -371,6 +371,7 @@ use soroban_sdk::{
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 /// Stable contract error codes returned by every failure path.
 ///
 /// Codes are part of the public interface: clients and indexers should
@@ -462,6 +463,12 @@ pub enum HamplardError {
     TokenNotApproved = 2,
 }
 >>>>>>> pr/584
+=======
+/// Number of ledgers to extend the instance TTL by on user activity.
+const INSTANCE_TTL_EXTEND: u32 = 100_000;
+/// Threshold below which the instance TTL is extended.
+const INSTANCE_TTL_THRESHOLD: u32 = 50_000;
+>>>>>>> pr/591
 
 // ============================================================
 // FEE & RISK DATA TYPES
