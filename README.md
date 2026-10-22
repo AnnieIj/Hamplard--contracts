@@ -9,6 +9,7 @@ Hamplard is an online learning platform for practical vocational skills — tail
 Hamplard Contracts is the Soroban smart contract layer for the Hamplard platform. It manages course lifecycle state, enrollment payments, instructor revenue splits, certificate issuance, and revocation in a trustless and auditable way.
 
 The contract provides the core rules for:
+
 - registering and approving courses
 - pausing and unpausing courses
 - archiving courses permanently
@@ -18,11 +19,13 @@ The contract provides the core rules for:
 - emitting events for off-chain indexing and backend synchronization
 
 ### Main contract concepts
+
 - Courses move through a lifecycle from Pending to Active, Paused, and Archived.
 - Enrollments trigger automatic platform and instructor payment splits.
 - Certificates can be issued after completion and later revoked with metadata captured on-chain.
 
 ### Key features
+
 - multi-admin authorization for sensitive operations
 - course status enforcement and lifecycle rules
 - instructor earnings accounting, including co-instructor revenue shares
@@ -35,11 +38,11 @@ The detailed documentation below expands on the architecture, data model, contra
 
 This is **Repo 1 of 3** in the Hamplard project:
 
-| Repo | Description |
-|------|-------------|
-| `hamplard-contract` ← you are here | Soroban smart contract (Rust) |
-| `hamplard-backend` | NestJS REST API + content management |
-| `hamplard-frontend` | Next.js student and instructor portal |
+| Repo                               | Description                           |
+| ---------------------------------- | ------------------------------------- |
+| `hamplard-contract` ← you are here | Soroban smart contract (Rust)         |
+| `hamplard-backend`                 | NestJS REST API + content management  |
+| `hamplard-frontend`                | Next.js student and instructor portal |
 
 ---
 
@@ -87,15 +90,15 @@ After a student completes a course (verified off-chain by the backend), the admi
 
 The contract intentionally stores only what is necessary for payments and verification. Everything else lives in the backend database:
 
-| Off-chain (backend) | On-chain (contract) |
-|---|---|
-| Video lessons | Course ID, price, instructor address |
-| Course descriptions | Total enrollments, total earned |
-| Assignments | Enrollment records |
-| Student progress % | Completion status |
-| Downloadable resources | Certificate with course title |
-| User profiles | — |
-| Instructor analytics | — |
+| Off-chain (backend)    | On-chain (contract)                  |
+| ---------------------- | ------------------------------------ |
+| Video lessons          | Course ID, price, instructor address |
+| Course descriptions    | Total enrollments, total earned      |
+| Assignments            | Enrollment records                   |
+| Student progress %     | Completion status                    |
+| Downloadable resources | Certificate with course title        |
+| User profiles          | —                                    |
+| Instructor analytics   | —                                    |
 
 This keeps the contract small, cheap to call, and focused on what blockchains are actually good at: verifiable ownership, trustless payments, and permanent records.
 
@@ -153,6 +156,8 @@ pub struct Course {
     pub total_enrollments: u32,                  // lifetime enrollments
     pub active_enrollments: u32,                 // enrolled but not completed/refunded
     pub total_earned: i128,                      // gross earnings, net of refunds
+    pub total_refunded: i128,                    // cumulative amount refunded (process_refund + archive_course)
+    pub refund_count: u32,                       // number of refunded enrollments
     pub status: CourseStatus,                    // Pending | Active | Paused | Rejected | Archived
     pub created_at_ledger: u32,
     pub max_capacity: Option<u32>,
@@ -381,6 +386,7 @@ Refunds debit the lead instructor and every co-instructor in the same
 proportions, so no recipient keeps revenue for an enrollment that was refunded.
 
 The platform fee percentage can be:
+
 - **Global default** (set at `init`, updatable by admin)
 - **Per-token configuration** via `set_fee_config(token, fee_bps)`
 - **Per-course override** captured at registration as a floor on the live fee
@@ -407,19 +413,19 @@ Returns `true` if the certificate exists and has not been revoked. The `get_cert
 
 ## Events
 
-| Event name | Payload | When |
-|---|---|---|
-| `course_registered` | `course_id` | Instructor registers a course |
-| `course_approved` | `course_id` | Admin approves a course |
-| `course_paused` | `course_id` | Course paused |
-| `course_unpaused` | `course_id` | Course unpaused |
-| `course_archived` | `course_id` | Course archived |
-| `student_enrolled` | `(course_id, student, amount_paid)` | Student enrolls and pays |
-| `course_completed` | `(course_id, student)` | Completion marked by admin |
-| `certificate_issued` | `(certificate_id, student, course_id)` | Certificate issued |
-| `certificate_revoked` | `certificate_id` | Certificate revoked |
+| Event name                    | Payload                                     | When                                      |
+| ----------------------------- | ------------------------------------------- | ----------------------------------------- |
+| `course_registered`           | `course_id`                                 | Instructor registers a course             |
+| `course_approved`             | `course_id`                                 | Admin approves a course                   |
+| `course_paused`               | `course_id`                                 | Course paused                             |
+| `course_unpaused`             | `course_id`                                 | Course unpaused                           |
+| `course_archived`             | `course_id`                                 | Course archived                           |
+| `student_enrolled`            | `(course_id, student, amount_paid)`         | Student enrolls and pays                  |
+| `course_completed`            | `(course_id, student)`                      | Completion marked by admin                |
+| `certificate_issued`          | `(certificate_id, student, course_id)`      | Certificate issued                        |
+| `certificate_revoked`         | `certificate_id`                            | Certificate revoked                       |
 | `course_certificates_revoked` | `(admin, course_id, revoked_count, ledger)` | All certificates of a course bulk-revoked |
-| `admin_transferred` | `new_admin` | Admin role transferred |
+| `admin_transferred`           | `new_admin`                                 | Admin role transferred                    |
 
 The backend listens to these events and updates the database, sends notifications, and triggers email confirmations.
 

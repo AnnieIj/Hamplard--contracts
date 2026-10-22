@@ -12175,3 +12175,250 @@ fn test_re_enroll_rejects_course_instructor_ref_mismatch() {
     // exactly as enroll() / validate_enrollment() would.
     client.re_enroll(&student, &course_id);
 }
+
+
+// COURSE REFUND STATS (#351): total_refunded / refund_count
+
+#[test]
+fn test_new_course_has_zero_refund_stats() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-STATS-ZERO",
+        500_000_000,
+    );
+    let course = client
+        .get_course(&String::from_str(&env, "COURSE-STATS-ZERO"))
+        .unwrap();
+    assert_eq!(course.total_refunded, 0);
+    assert_eq!(course.refund_count, 0);
+}
+
+#[test]
+fn test_process_refund_full_updates_course_refund_stats() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student_a = Address::generate(&env);
+    let student_b = Address::generate(&env);
+    let asset_client = token::StellarAssetClient::new(&env, &token_id);
+    asset_client.mint(&student_a, &10_000_000_000);
+    asset_client.mint(&student_b, &10_000_000_000);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-STATS-FULL",
+        1_000_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-STATS-FULL");
+
+    client.enroll(&student_a, &course_id);
+    client.enroll(&student_b, &course_id);
+
+    // Refund only student_a; student_b stays enrolled.
+    client.request_refund(&student_a, &course_id);
+    env.mock_all_auths_allowing_non_root_auth();
+    client.process_refund(&admin, &student_a, &course_id, &true, &None);
+
+    let course = client.get_course(&course_id).unwrap();
+    assert_eq!(course.refund_count, 1);
+    assert_eq!(course.total_refunded, 1_000_000_000);
+    assert_eq!(course.active_enrollments, 1);
+
+    // A second refund accumulates on top of the first.
+    client.request_refund(&student_b, &course_id);
+    client.process_refund(&admin, &student_b, &course_id, &true, &None);
+
+    let course = client.get_course(&course_id).unwrap();
+    assert_eq!(course.refund_count, 2);
+    assert_eq!(course.total_refunded, 2_000_000_000);
+}
+
+#[test]
+fn test_process_refund_partial_adds_only_refunded_amount() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &10_000_000_000);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-STATS-PARTIAL",
+        1_000_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-STATS-PARTIAL");
+
+    client.enroll(&student, &course_id);
+    client.request_refund(&student, &course_id);
+    env.mock_all_auths_allowing_non_root_auth();
+    client.process_refund(&admin, &student, &course_id, &true, &Some(400_000_000));
+
+    let course = client.get_course(&course_id).unwrap();
+    assert_eq!(course.refund_count, 1);
+    assert_eq!(course.total_refunded, 400_000_000);
+}
+
+#[test]
+fn test_process_refund_rejection_leaves_refund_stats_unchanged() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &10_000_000_000);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-STATS-REJECT",
+        1_000_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-STATS-REJECT");
+
+    client.enroll(&student, &course_id);
+    client.request_refund(&student, &course_id);
+    env.mock_all_auths_allowing_non_root_auth();
+    client.process_refund(&admin, &student, &course_id, &false, &None);
+
+    let course = client.get_course(&course_id).unwrap();
+    assert_eq!(course.refund_count, 0);
+    assert_eq!(course.total_refunded, 0);
+    assert_eq!(course.active_enrollments, 1);
+}
+
+#[test]
+fn test_archive_course_refunds_update_course_refund_stats() {
+    let (env, contract_id, token_id, admin, sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let student_a = Address::generate(&env);
+    let student_b = Address::generate(&env);
+    let asset_client = token::StellarAssetClient::new(&env, &token_id);
+    asset_client.mint(&student_a, &1_000_000_000);
+    asset_client.mint(&student_b, &1_000_000_000);
+
+    let price = 500_000_000;
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-STATS-ARCHIVE",
+        price,
+    );
+    let course_id = String::from_str(&env, "COURSE-STATS-ARCHIVE");
+
+    client.enroll(&student_a, &course_id);
+    client.enroll(&student_b, &course_id);
+    client.pause_course(&admin, &course_id);
+
+    let mut refund_students = soroban_sdk::Vec::new(&env);
+    refund_students.push_back(student_a.clone());
+    refund_students.push_back(student_b.clone());
+
+    env.mock_all_auths_allowing_non_root_auth();
+    client.archive_course(&admin, &sec_admin, &course_id, &Some(refund_students));
+
+    let course = client.get_course(&course_id).unwrap();
+    assert_eq!(course.status, CourseStatus::Archived);
+    assert_eq!(course.refund_count, 2);
+    assert_eq!(course.total_refunded, price * 2);
+}
+
+#[test]
+fn test_archive_course_incremental_batches_accumulate_refund_stats() {
+    let (env, contract_id, token_id, admin, sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let mut students: std::vec::Vec<Address> = std::vec::Vec::new();
+    for _ in 0..5 {
+        let s = Address::generate(&env);
+        token::StellarAssetClient::new(&env, &token_id).mint(&s, &1_000_000_000);
+        students.push(s);
+    }
+
+    let price = 500_000_000;
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-STATS-BATCHES",
+        price,
+    );
+    let course_id = String::from_str(&env, "COURSE-STATS-BATCHES");
+
+    for student in &students {
+        client.enroll(student, &course_id);
+    }
+    client.pause_course(&admin, &course_id);
+
+    let mut batch1 = soroban_sdk::Vec::new(&env);
+    batch1.push_back(students[0].clone());
+    batch1.push_back(students[1].clone());
+
+    env.mock_all_auths_allowing_non_root_auth();
+    client.archive_course(&admin, &sec_admin, &course_id, &Some(batch1));
+
+    // Course stays Paused; stats from the first batch must be persisted.
+    let course = client.get_course(&course_id).unwrap();
+    assert_eq!(course.status, CourseStatus::Paused);
+    assert_eq!(course.refund_count, 2);
+    assert_eq!(course.total_refunded, price * 2);
+
+    let mut batch2 = soroban_sdk::Vec::new(&env);
+    for i in 2..5 {
+        batch2.push_back(students[i].clone());
+    }
+    client.archive_course(&admin, &sec_admin, &course_id, &Some(batch2));
+
+    let course = client.get_course(&course_id).unwrap();
+    assert_eq!(course.status, CourseStatus::Archived);
+    assert_eq!(course.refund_count, 5);
+    assert_eq!(course.total_refunded, price * 5);
+}
+
+#[test]
+fn test_archive_course_without_refunds_leaves_refund_stats_zero() {
+    let (env, contract_id, token_id, admin, sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-STATS-NOREFUND",
+        500_000_000,
+    );
+    let course_id = String::from_str(&env, "COURSE-STATS-NOREFUND");
+    client.pause_course(&admin, &course_id);
+
+    env.mock_all_auths_allowing_non_root_auth();
+    client.archive_course(&admin, &sec_admin, &course_id, &None);
+
+    let course = client.get_course(&course_id).unwrap();
+    assert_eq!(course.status, CourseStatus::Archived);
+    assert_eq!(course.refund_count, 0);
+    assert_eq!(course.total_refunded, 0);
+}

@@ -377,6 +377,19 @@ pub struct Course {
     /// Incremented by `course.price` on enrollment and decremented by the
     /// refunded `amount_paid` on every refund path (process_refund, archive_course).
     pub total_earned: i128,
+    /// Cumulative USDC refunded to students for this course (in stroops).
+    /// Incremented on every refund path: by the actual refunded amount in
+    /// `process_refund` (partial refunds count only what was paid back) and by
+    /// `platform_amount + instructor_amount` per student in `archive_course`.
+    /// Combined with `refund_count` this gives an on-chain refund rate.
+    ///
+    /// Storage layout: added after earlier deployments. Courses persisted
+    /// before this field existed lack the key and must be migrated.
+    pub total_refunded: i128,
+    /// Number of enrollments refunded for this course (one per refunded
+    /// enrollment, via either `process_refund` or `archive_course`).
+    /// See `total_refunded` for the storage layout note.
+    pub refund_count: u32,
     /// Course status
     pub status: CourseStatus,
     /// Ledger sequence when the course was registered
@@ -1136,6 +1149,8 @@ impl HamplardContract {
             total_enrollments: 0,
             active_enrollments: 0,
             total_earned: 0,
+            total_refunded: 0,
+            refund_count: 0,
             status: CourseStatus::Pending,
             created_at_ledger: env.ledger().sequence(),
             max_capacity,
@@ -1748,6 +1763,18 @@ impl HamplardContract {
                     }
                 }
             }
+        }
+
+        // Record this batch's refunds in the course's cumulative stats.
+        if refund_count > 0 {
+            course.refund_count = course
+                .refund_count
+                .checked_add(refund_count)
+                .unwrap_or_else(|| panic!("course refund_count overflow"));
+            course.total_refunded = course
+                .total_refunded
+                .checked_add(total_refunded)
+                .unwrap_or_else(|| panic!("course total_refunded overflow"));
         }
 
         // Only archive when there are no remaining active enrollments.
@@ -4940,6 +4967,17 @@ impl HamplardContract {
             let mut course = Self::get_course_internal(&env, &course_id)
                 .unwrap_or_else(|| panic!("course not found"));
             let breakdown = Self::refund_enrollment(&env, &mut course, &student, refund_amount);
+
+            // Record the refund in the course's cumulative stats. Partial
+            // refunds add only the amount actually paid back.
+            course.refund_count = course
+                .refund_count
+                .checked_add(1)
+                .unwrap_or_else(|| panic!("course refund_count overflow"));
+            course.total_refunded = course
+                .total_refunded
+                .checked_add(breakdown.refund_amount)
+                .unwrap_or_else(|| panic!("course total_refunded overflow"));
 
             course.last_updated_ledger = env.ledger().sequence();
             env.storage()
