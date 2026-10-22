@@ -8,11 +8,6 @@
 
 - `Course` gains two fields, `total_refunded: i128` and `refund_count: u32`, updated by both refund paths (`process_refund` and `archive_course`) so admins can read per-course refund rates on-chain via `get_course`. `Course` is a `#[contracttype]` struct, so courses stored before this change lack the new keys and will not deserialize against the new type; redeploy fresh, or migrate existing `Course` / `ArchivedCourse` entries before upgrading a live contract.
 =======
-### Changed
-
-- `revoke_certificate` now panics if `reason` is empty (`revocation reason cannot be empty`) or longer than 64 bytes (`revocation reason exceeds maximum length`). Callers passing an empty or oversize reason must shorten or supply one.
->>>>>>> pr/568
-=======
 ### Added
 - Refunds now release a course capacity seat by decrementing `total_enrollments`; `max_capacity` remains a lifetime cap on non-refunded enrollments.
 - `update_min_completion_ledgers()` now rejects values above `MAX_MIN_COMPLETION_LEDGERS` (1,000,000 ledgers).
@@ -57,3 +52,34 @@
 
 ### Tests
 - Add targeted `mock_auths` coverage for privileged and fund-moving entrypoints, asserting exactly which signers each operation requires instead of relying on `mock_all_auths()`.
+=======
+### Breaking changes
+- `Enrollment.evidence_hash` and `mark_completed(..., evidence_hash)` now use `Option<BytesN<32>>` instead of `Option<String>`. Evidence is stored as a fixed 32-byte hash to reduce on-chain storage cost and keep verification deterministic.
+- `freeze_instructor(admin, instructor, reason)` and `block_student(admin, student, reason)` now require a non-empty reason of at most 256 bytes. Their events include the reason.
+- `get_instructor_total_earnings(instructor)` is removed because it mixed balances denominated in different tokens. Use `get_instructor_lifetime_earnings(instructor, token)` instead.
+
+### Added
+- `get_enrollment_status(student, course_id)` returns `None`, `Active`, `Expired`, `Completed`, or `Refunded`, including refunds recovered from enrollment history.
+- `get_instructor_freeze_reason(instructor)` and `get_student_block_reason(student)` expose stored moderation reasons.
+
+### Fixed
+- Free-course enrollments no longer consume the platform-wide paid-enrollment cap or decrement its counter on completion/refund.
+- Instructor lifetime net earnings are tracked per token; withdrawals do not change them and refunds debit only the refunded token.
+
+### Migration
+- Existing `InstructorTotalEarnings` entries are no longer read. Historic cross-token totals cannot be decomposed into per-token amounts, so per-token lifetime counters start from zero after upgrade; refunds use saturating subtraction so pre-upgrade enrollments remain refundable.
+>>>>>>> pr/579
+
+- `freeze_instructor(admin, instructor, reason)` and `block_student(admin, student, reason)` now require a non-empty reason of at most 256 bytes. Their events include the reason.
+- `get_instructor_total_earnings(instructor)` is removed because it mixed balances denominated in different tokens. Use `get_instructor_lifetime_earnings(instructor, token)` instead.
+
+### Added
+- `get_enrollment_status(student, course_id)` returns `None`, `Active`, `Expired`, `Completed`, or `Refunded`, including refunds recovered from enrollment history.
+- `get_instructor_freeze_reason(instructor)` and `get_student_block_reason(student)` expose stored moderation reasons.
+
+### Fixed
+- Free-course enrollments no longer consume the platform-wide paid-enrollment cap or decrement its counter on completion/refund.
+- Instructor lifetime net earnings are tracked per token; withdrawals do not change them and refunds debit only the refunded token.
+
+### Migration
+- Existing `InstructorTotalEarnings` entries are no longer read. Historic cross-token totals cannot be decomposed into per-token amounts, so per-token lifetime counters start from zero after upgrade; refunds use saturating subtraction so pre-upgrade enrollments remain refundable.
