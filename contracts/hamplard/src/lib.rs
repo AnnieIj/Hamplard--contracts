@@ -551,6 +551,12 @@ pub struct RefundRequest {
     pub refund_amount: Option<i128>,
 }
 
+struct RefundBreakdown {
+    refund_amount: i128,
+    platform_refund: i128,
+    instructor_refund: i128,
+}
+
 /// Aggregate on-chain reputation stats for an instructor, accumulated
 /// across all of their courses. Gives students an on-chain signal of an
 /// instructor's track record without relying on off-chain review systems.
@@ -1722,14 +1728,6 @@ impl HamplardContract {
         let mut total_refunded = 0i128;
 
         if let Some(ref students) = students_to_refund {
-            let token_client = token::Client::new(&env, &course.token);
-
-            let treasury: Address = env
-                .storage()
-                .instance()
-                .get(&DataKey::Treasury)
-                .unwrap_or_else(|| panic!("treasury not set"));
-
             for student in students.iter() {
                 let enrollment_key = DataKey::Enrollment(student.clone(), course_id.clone());
                 if env.storage().persistent().has(&enrollment_key) {
@@ -1737,57 +1735,14 @@ impl HamplardContract {
                         env.storage().persistent().get(&enrollment_key).unwrap();
 
                     if !enrollment.completed && !enrollment.is_refunded {
-                        let platform_amount = enrollment.platform_amount;
-                        let instructor_amount = enrollment.instructor_amount;
-
-                        if platform_amount > 0 {
-                            token_client.transfer(&treasury, &student, &platform_amount);
-                        }
-
-                        if instructor_amount > 0 {
-                            Self::debit_instructor_shares(&env, &course, instructor_amount);
-                            token_client.transfer(
-                                &env.current_contract_address(),
-                                &student,
-                                &instructor_amount,
-                            );
-                        }
-
-                        // Archive the refunded enrollment before removing the active record.
-                        let mut archived_enrollment: Enrollment = enrollment.clone();
-                        archived_enrollment.is_refunded = true;
-                        let history_key =
-                            DataKey::EnrollmentHistory(student.clone(), course_id.clone());
-                        let mut history: Vec<Enrollment> = env
-                            .storage()
-                            .persistent()
-                            .get(&history_key)
-                            .unwrap_or_else(|| Vec::new(&env));
-                        history.push_back(archived_enrollment);
-                        env.storage().persistent().set(&history_key, &history);
-                        env.storage().persistent().extend_ttl(
-                            &history_key,
-                            Self::PERSISTENT_TTL_THRESHOLD,
-                            Self::PERSISTENT_TTL_EXTEND_TO,
-                        );
-
-                        env.storage().persistent().remove(&enrollment_key);
+                        let breakdown = Self::refund_enrollment(&env, &mut course, &student, None);
 
                         refund_count = refund_count
                             .checked_add(1)
                             .unwrap_or_else(|| panic!("refund count overflow"));
                         total_refunded = total_refunded
-                            .checked_add(platform_amount + instructor_amount)
+                            .checked_add(breakdown.platform_refund + breakdown.instructor_refund)
                             .unwrap_or_else(|| panic!("total_refunded overflow"));
-
-                        if course.active_enrollments > 0 {
-                            course.active_enrollments -= 1;
-                        }
-
-                        let total_active: u32 = Self::read_total_active_enrollments(&env);
-                        if total_active > 0 {
-                            Self::write_total_active_enrollments(&env, total_active - 1);
-                        }
 
                         Self::promote_from_waitlist(&env, &course_id);
                     }
@@ -4948,101 +4903,15 @@ impl HamplardContract {
         if approved {
             let mut course = Self::get_course_internal(&env, &course_id)
                 .unwrap_or_else(|| panic!("course not found"));
-            let enrollment_key = DataKey::Enrollment(student.clone(), course_id.clone());
-            let mut enrollment = env
-                .storage()
-                .persistent()
-                .get::<DataKey, Enrollment>(&enrollment_key)
-                .unwrap_or_else(|| panic!("enrollment not found"));
-
-            // Use the split actually applied at enroll()/re_enroll() time
-            // (persisted on the enrollment record) rather than recomputing
-            // it from course.platform_fee_percent, which is never consulted
-            // at enrollment and may have since diverged from the FeeConfig
-            // (and any risk surcharge) that deduct_fee() actually applied.
-            let platform_amount = enrollment.platform_amount;
-            let instructor_amount = enrollment.instructor_amount;
-            let actual_refund_amount = match refund_amount {
-                Some(amount) => {
-                    if amount < 0 || amount > enrollment.amount_paid {
-                        panic!("refund amount must be <= amount_paid");
-                    }
-                    amount
-                }
-                None => enrollment.amount_paid,
-            };
-            let platform_refund = if enrollment.amount_paid == 0 {
-                0
-            } else {
-                actual_refund_amount
-                    .checked_mul(platform_amount)
-                    .map(|v| v / enrollment.amount_paid)
-                    .unwrap_or_else(|| panic!("overflow computing platform refund"))
-            };
-            let instructor_refund = actual_refund_amount
-                .checked_sub(platform_refund)
-                .unwrap_or_else(|| panic!("refund split underflow"));
-
-            let token_client = token::Client::new(&env, &course.token);
-            let treasury: Address = env
-                .storage()
-                .instance()
-                .get(&DataKey::Treasury)
-                .unwrap_or_else(|| panic!("treasury not set"));
-
-            // Refund platform fee from treasury, proportional to the request when
-            // a partial amount is specified.
-            if platform_refund > 0 {
-                token_client.transfer(&treasury, &student, &platform_refund);
-            }
-
-            // Refund instructor share from contract-held earnings, again using the
-            // proportional partial split when a refund amount is requested.
-            if instructor_refund > 0 {
-                Self::debit_instructor_shares(&env, &course, instructor_refund);
-                token_client.transfer(
-                    &env.current_contract_address(),
-                    &student,
-                    &instructor_refund,
-                );
-            }
-
-            // Archive the refunded enrollment to EnrollmentHistory before
-            // removing the active record, so the refund is auditable on-chain.
-            enrollment.is_refunded = true;
-            let history_key = DataKey::EnrollmentHistory(student.clone(), course_id.clone());
-            let mut history: Vec<Enrollment> = env
-                .storage()
-                .persistent()
-                .get(&history_key)
-                .unwrap_or_else(|| Vec::new(&env));
-            history.push_back(enrollment.clone());
-            env.storage().persistent().set(&history_key, &history);
-            env.storage().persistent().extend_ttl(
-                &history_key,
-                Self::PERSISTENT_TTL_THRESHOLD,
-                Self::PERSISTENT_TTL_EXTEND_TO,
-            );
-            env.storage().persistent().remove(&enrollment_key);
-
-            // Decrement active enrollments
-            if course.active_enrollments > 0 {
-                course.active_enrollments -= 1;
-            }
+            let breakdown = Self::refund_enrollment(&env, &mut course, &student, refund_amount);
 
             course.last_updated_ledger = env.ledger().sequence();
             env.storage()
                 .persistent()
                 .set(&DataKey::Course(course_id.clone()), &course);
 
-            // Decrement platform-wide active enrollment counter
-            let total_active: u32 = Self::read_total_active_enrollments(&env);
-            if total_active > 0 {
-                Self::write_total_active_enrollments(&env, total_active - 1);
-            }
-
             request.status = RefundStatus::Approved;
-            request.refund_amount = Some(actual_refund_amount);
+            request.refund_amount = Some(breakdown.refund_amount);
         } else {
             request.status = RefundStatus::Rejected;
             request.refund_amount = None;
@@ -5923,6 +5792,89 @@ impl HamplardContract {
             env.storage()
                 .instance()
                 .set(&outstanding_key, &new_outstanding);
+        }
+    }
+
+    fn refund_enrollment(
+        env: &Env,
+        course: &mut Course,
+        student: &Address,
+        refund_amount: Option<i128>,
+    ) -> RefundBreakdown {
+        let enrollment_key = DataKey::Enrollment(student.clone(), course.id.clone());
+        let mut enrollment: Enrollment = env
+            .storage()
+            .persistent()
+            .get(&enrollment_key)
+            .unwrap_or_else(|| panic!("enrollment not found"));
+
+        // Use the split actually applied at enrollment time. For partial
+        // refunds, preserve that ratio and assign rounding remainder to instructor.
+        let actual_refund_amount = match refund_amount {
+            Some(amount) => {
+                if amount < 0 || amount > enrollment.amount_paid {
+                    panic!("refund amount must be <= amount_paid");
+                }
+                amount
+            }
+            None => enrollment.amount_paid,
+        };
+        let platform_refund = if enrollment.amount_paid == 0 {
+            0
+        } else {
+            actual_refund_amount
+                .checked_mul(enrollment.platform_amount)
+                .map(|value| value / enrollment.amount_paid)
+                .unwrap_or_else(|| panic!("overflow computing platform refund"))
+        };
+        let instructor_refund = actual_refund_amount
+            .checked_sub(platform_refund)
+            .unwrap_or_else(|| panic!("refund split underflow"));
+
+        let token_client = token::Client::new(env, &course.token);
+        let treasury: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Treasury)
+            .unwrap_or_else(|| panic!("treasury not set"));
+
+        if platform_refund > 0 {
+            token_client.transfer(&treasury, student, &platform_refund);
+        }
+        if instructor_refund > 0 {
+            Self::debit_instructor_shares(env, course, instructor_refund);
+            token_client.transfer(&env.current_contract_address(), student, &instructor_refund);
+        }
+
+        enrollment.is_refunded = true;
+        let history_key = DataKey::EnrollmentHistory(student.clone(), course.id.clone());
+        let mut history: Vec<Enrollment> = env
+            .storage()
+            .persistent()
+            .get(&history_key)
+            .unwrap_or_else(|| Vec::new(env));
+        history.push_back(enrollment);
+        env.storage().persistent().set(&history_key, &history);
+        env.storage().persistent().extend_ttl(
+            &history_key,
+            Self::PERSISTENT_TTL_THRESHOLD,
+            Self::PERSISTENT_TTL_EXTEND_TO,
+        );
+        env.storage().persistent().remove(&enrollment_key);
+
+        if course.active_enrollments > 0 {
+            course.active_enrollments -= 1;
+        }
+
+        let total_active: u32 = Self::read_total_active_enrollments(env);
+        if total_active > 0 {
+            Self::write_total_active_enrollments(env, total_active - 1);
+        }
+
+        RefundBreakdown {
+            refund_amount: actual_refund_amount,
+            platform_refund,
+            instructor_refund,
         }
     }
 
