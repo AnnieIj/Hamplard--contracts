@@ -984,6 +984,14 @@ impl HamplardContract {
             .get(&DataKey::MaxCoursesPerInstructor)
             .unwrap_or(50);
 
+        // A stored limit of 0 would block every instructor from registering
+        // (current_count >= 0 is always true). Reject it defensively so a
+        // misconfigured update_max_courses_limit(0) cannot silently freeze
+        // all registrations; use a positive limit instead.
+        if max_courses == 0 {
+            panic!("max courses per instructor must be greater than zero");
+        }
+
         let course_count_key = DataKey::InstructorCourseCount(instructor.clone());
         let current_count: u32 = env.storage().instance().get(&course_count_key).unwrap_or(0);
 
