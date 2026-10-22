@@ -11114,6 +11114,235 @@ fn setup_arbitration(
     student
 }
 
+// ============================================================
+// #499 — ARBITRATION FEE CONFIG COVERAGE
+// ============================================================
+
+/// The fee config reads as zero before an admin ever sets it, so callers can
+/// rely on `get_arbitration_fee_config()` without an unwrap.
+#[test]
+fn test_arbitration_fee_config_defaults_to_zero() {
+    let (env, contract_id, _token_id, _admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let config = client.get_arbitration_fee_config();
+    assert_eq!(config.fee_per_case, 0);
+}
+
+/// Setting the fee persists it and is observable through the getter.
+#[test]
+fn test_set_arbitration_fee_config_round_trips() {
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    client.set_arbitration_fee_config(&admin, &7_500_000i128);
+    assert_eq!(client.get_arbitration_fee_config().fee_per_case, 7_500_000);
+
+    // A later update replaces the previous value rather than accumulating.
+    client.set_arbitration_fee_config(&admin, &1_250_000i128);
+    assert_eq!(client.get_arbitration_fee_config().fee_per_case, 1_250_000);
+}
+
+/// The update is announced so off-chain tooling can follow the current fee.
+#[test]
+fn test_set_arbitration_fee_config_emits_event() {
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    client.set_arbitration_fee_config(&admin, &4_000_000i128);
+
+    let mut seen = 0u32;
+    for (contract, topics, data) in env.events().all().iter() {
+        if contract != contract_id {
+            continue;
+        }
+        let sym: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        if sym != Symbol::new(&env, "arbitration_fee_config_updated") {
+            continue;
+        }
+        seen += 1;
+        let emitted_admin: Address = topics.get(1).unwrap().try_into_val(&env).unwrap();
+        assert_eq!(emitted_admin, admin);
+        let emitted_fee: i128 = data.try_into_val(&env).unwrap();
+        assert_eq!(emitted_fee, 4_000_000);
+    }
+    assert_eq!(seen, 1);
+}
+
+#[test]
+#[should_panic(expected = "fee_per_case cannot be negative")]
+fn test_set_arbitration_fee_config_rejects_negative_fee() {
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    client.set_arbitration_fee_config(&admin, &-1i128);
+}
+
+#[test]
+#[should_panic(expected = "unauthorized: set_arbitration_fee_config - caller is not admin")]
+fn test_set_arbitration_fee_config_requires_admin() {
+    let (env, contract_id, _token_id, _admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    client.set_arbitration_fee_config(&instructor, &1_000_000i128);
+}
+
+/// Escalating before any fee is configured must fail loudly instead of opening
+/// a free arbitration case.
+#[test]
+#[should_panic(expected = "arbitration fee not configured")]
+fn test_escalate_without_configured_fee_panics() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-ARB-NOFEE",
+        1_000_000_000,
+    );
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+    let course_id = String::from_str(&env, "COURSE-ARB-NOFEE");
+    client.enroll(&student, &course_id);
+
+    // Default config is fee_per_case == 0, so this must panic.
+    client.escalate_to_arbitration(&student, &course_id);
+}
+
+/// A zero fee configured explicitly is treated the same as no config at all.
+#[test]
+#[should_panic(expected = "arbitration fee not configured")]
+fn test_escalate_with_zero_fee_panics() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    client.set_arbitration_fee_config(&admin, &0i128);
+
+    register_and_approve_course(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-ARB-ZEROFEE",
+        1_000_000_000,
+    );
+    let student = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&student, &100_000_000_000);
+    let course_id = String::from_str(&env, "COURSE-ARB-ZEROFEE");
+    client.enroll(&student, &course_id);
+
+    client.escalate_to_arbitration(&student, &course_id);
+}
+
+#[test]
+#[should_panic(expected = "course not found")]
+fn test_escalate_unknown_course_panics() {
+    let (env, contract_id, _token_id, admin, _sec_admin, _treasury, _instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    client.set_arbitration_fee_config(&admin, &1_000_000i128);
+
+    let caller = Address::generate(&env);
+    client.escalate_to_arbitration(&caller, &String::from_str(&env, "COURSE-DOES-NOT-EXIST"));
+}
+
+/// The fee is really escrowed: the caller is debited and the contract holds the
+/// fee until the case is resolved. The running total tracks the outstanding sum.
+#[test]
+fn test_escalation_escrows_fee_in_contract() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+    let token_client = token::Client::new(&env, &token_id);
+
+    let fee_per_case = 5_000_000i128;
+    let student = setup_arbitration(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-ARB-ESCROW",
+        fee_per_case,
+    );
+    let course_id = String::from_str(&env, "COURSE-ARB-ESCROW");
+
+    let caller_before = token_client.balance(&student);
+    let contract_before = token_client.balance(&contract_id);
+
+    client.escalate_to_arbitration(&student, &course_id);
+
+    assert_eq!(
+        caller_before - token_client.balance(&student),
+        fee_per_case,
+        "the caller must pay the arbitration fee"
+    );
+    assert_eq!(
+        token_client.balance(&contract_id) - contract_before,
+        fee_per_case,
+        "the fee must be escrowed by the contract, not forwarded yet"
+    );
+    assert_eq!(
+        client.get_total_arbitration_fees(&token_id),
+        fee_per_case,
+        "the outstanding arbitration total must track the escrowed fee"
+    );
+
+    // A second caller opening their own case adds to the same token total.
+    let other = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id).mint(&other, &100_000_000_000);
+    client.escalate_to_arbitration(&other, &course_id);
+    assert_eq!(
+        client.get_total_arbitration_fees(&token_id),
+        fee_per_case * 2
+    );
+}
+
+/// The escalation event carries the caller, the course and the fee paid, so
+/// indexers do not have to reconstruct it from the case record.
+#[test]
+fn test_escalation_event_carries_fee_payload() {
+    let (env, contract_id, token_id, admin, _sec_admin, _treasury, instructor) = setup();
+    let client = HamplardContractClient::new(&env, &contract_id);
+
+    let fee_per_case = 3_000_000i128;
+    let student = setup_arbitration(
+        &env,
+        &client,
+        &token_id,
+        &admin,
+        &instructor,
+        "COURSE-ARB-EVENT",
+        fee_per_case,
+    );
+    let course_id = String::from_str(&env, "COURSE-ARB-EVENT");
+
+    client.escalate_to_arbitration(&student, &course_id);
+
+    let mut seen = 0u32;
+    for (contract, topics, data) in env.events().all().iter() {
+        if contract != contract_id {
+            continue;
+        }
+        let sym: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        if sym != Symbol::new(&env, "dispute_escalated") {
+            continue;
+        }
+        seen += 1;
+        let topic_course: String = topics.get(1).unwrap().try_into_val(&env).unwrap();
+        assert_eq!(topic_course, course_id);
+
+        let (event_caller, event_course, event_fee): (Address, String, i128) =
+            data.try_into_val(&env).unwrap();
+        assert_eq!(event_caller, student);
+        assert_eq!(event_course, course_id);
+        assert_eq!(event_fee, fee_per_case);
+    }
+    assert_eq!(seen, 1, "exactly one dispute_escalated event per escalation");
+}
+
 /// #255 — escalate_to_arbitration() must persist a queryable ArbitrationCase record.
 #[test]
 fn test_escalation_creates_retrievable_arbitration_case() {
