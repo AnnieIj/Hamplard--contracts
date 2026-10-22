@@ -122,6 +122,7 @@ extern crate std;
 use soroban_sdk::{
     contract, contractimpl, contracttype, token, Address, BytesN, Env, Map, String, Symbol, Vec,
 };
+use soroban_sdk::contractevent;
 
 // ============================================================
 // FEE & RISK DATA TYPES
@@ -224,6 +225,17 @@ pub struct RiskFeeApplied {
     pub platform_fee: i128,
 }
 
+#[contractevent]
+#[derive(Clone, Debug, PartialEq)]
+pub struct RiskFeeAppliedEvent {
+    #[topic]
+    pub payment_amount: i128,
+    pub base_fee_bps: u32,
+    pub risk_surcharge_bps: u32,
+    pub effective_fee_bps: u32,
+    pub platform_fee: i128,
+}
+
 /// Emitted when an enrollment is rejected due to course status.
 /// Includes course_id, student address, course status, and ledger sequence
 /// so rejection reasons are auditable off-chain.
@@ -244,6 +256,18 @@ pub struct EnrollmentFailed {
     pub student: Address,
     pub reason_code: String,
     pub ledger_sequence: u32,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, PartialEq)]
+pub struct InitializedEvent {
+    #[topic]
+    pub admin: Address,
+    pub secondary_admin: Address,
+    pub treasury: Address,
+    pub default_fee_pct: u32,
+    pub max_courses_per_instructor: u32,
+    pub refund_window_ledgers: u32,
 }
 
 // ============================================================
@@ -639,6 +663,13 @@ pub struct PendingUpgrade {
     pub effective_ledger: u32,
 }
 
+#[contractevent]
+#[derive(Clone, Debug, PartialEq)]
+pub struct CourseRegisteredEvent {
+    #[topic]
+    pub course_id: String,
+}
+
 // ============================================================
 // CONTRACT
 // ============================================================
@@ -784,17 +815,15 @@ impl HamplardContract {
             .instance()
             .set(&DataKey::InitLedger, &env.ledger().sequence());
 
-        env.events().publish(
-            (Symbol::new(&env, "initialized"), admin.clone()),
-            (
-                admin,
-                secondary_admin,
-                treasury,
-                default_fee_pct,
-                max_courses_per_instructor,
-                refund_window_ledgers,
-            ),
-        );
+        InitializedEvent {
+            admin: admin.clone(),
+            secondary_admin,
+            treasury,
+            default_fee_pct,
+            max_courses_per_instructor,
+            refund_window_ledgers,
+        }
+        .publish(&env);
     }
 
     /// Instructor or admin configures an optional ledger sequence when enrollment opens.
@@ -1153,10 +1182,10 @@ impl HamplardContract {
             );
         }
 
-        env.events().publish(
-            (Symbol::new(&env, "course_registered"), course_id.clone()),
-            course_id.clone(),
-        );
+        CourseRegisteredEvent {
+            course_id: course_id.clone(),
+        }
+        .publish(&env);
 
         course_id
     }
@@ -6019,8 +6048,14 @@ impl HamplardContract {
 
         // Publish RiskFeeApplied event when a risk surcharge was applied
         if breakdown.risk_surcharge_bps > 0 {
-            env.events()
-                .publish((Symbol::new(env, "risk_fee_applied"),), breakdown);
+            RiskFeeAppliedEvent {
+                payment_amount: breakdown.payment_amount,
+                base_fee_bps: breakdown.base_fee_bps,
+                risk_surcharge_bps: breakdown.risk_surcharge_bps,
+                effective_fee_bps: breakdown.effective_fee_bps,
+                platform_fee: breakdown.platform_fee,
+            }
+            .publish(env);
         }
 
         (net_amount, platform_fee)
