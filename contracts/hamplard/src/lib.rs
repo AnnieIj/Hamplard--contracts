@@ -8338,6 +8338,18 @@ impl HamplardContract {
             .unwrap_or(false)
     }
 
+    /// Returns `true` if the platform is currently paused, `false` otherwise.
+    ///
+    /// `PlatformPaused` is set at `init()` and toggled by `pause_platform()` /
+    /// `unpause_platform()`. This view lets callers discover the paused state
+    /// without attempting an enrollment or reading raw storage.
+    pub fn is_platform_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::PlatformPaused)
+            .unwrap_or(false)
+    }
+
     /// Admin sets the risk fee configuration — parameters that determine
     /// surcharges based on payment size, customer history, and currency.
     ///
