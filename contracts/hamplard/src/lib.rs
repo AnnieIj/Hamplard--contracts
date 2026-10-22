@@ -4169,9 +4169,10 @@ impl HamplardContract {
             .instance()
             .set(&DataKey::DefaultFee, &new_fee_pct);
 
+        let ledger_sequence = env.ledger().sequence();
         env.events().publish(
             (Symbol::new(&env, "default_fee_updated"), admin.clone()),
-            (admin, new_fee_pct),
+            (current_fee, new_fee_pct, admin, ledger_sequence),
         );
     }
 
