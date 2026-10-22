@@ -712,6 +712,7 @@ stellar contract invoke \
 - **Atomic payment split**: Both the platform and instructor transfers happen in the same transaction. There is no intermediate escrow that could be exploited.
 - **Certificate immutability**: Revoked certificates are flagged — not deleted. This preserves the audit trail and prevents a revocation from being hidden. Revocation is permanent only after the challenge period elapses.
 - **Fee validation**: Platform fee percentage is validated to be ≤ 100 at both `init` and `register_course` time.
+- **Event schema stability**: Event topics and data layouts are part of the public interface. Off-chain indexers must be updated in lockstep with any contract change to the events table above.
 
 ---
 
@@ -739,3 +740,5 @@ stellar contract invoke \
 ## License
 
 MIT
+
+> **Note:** The events table above is the source of truth for off-chain indexers. When adding or changing an event in `contracts/hamplard/src/lib.rs`, update this table in the same PR.
